@@ -11,9 +11,12 @@
  *   - PubSubClient  https://github.com/knolleary/PubSubClient
  *   - ArduinoJson   https://arduinojson.org/
  *
- * 接线请严格对照 V46 定稿 GPIO 表：
+ * 接线请严格对照 V64.1 勘误 GPIO 表（2026-11-01 修正：WROOM-02/MINI-1 模组官方仅引出
+ * GPIO0~10、18~21，GPIO11~17 物理不存在，原 V46 表声敏11/I2S 12-14/RGB 16-17 已废弃）：
  *   雷达=GPIO4/5 · SHT3X I2C=GPIO6(SDA)/7(SCL) · MQ ADC=GPIO3 · MQ MOS=GPIO10
- *   声敏=GPIO11 · 光敏=GPIO1 · I2S=GPIO12/13/14 · RGB=GPIO16/17/18 · 按键=GPIO19 · 低电采样=GPIO0
+ *   声敏=GPIO20(DO) · 光敏=GPIO1 · I2S=GPIO9(BCK)/18(WS)/21(DIN)
+ *   RGB(WS2812)=GPIO8 · 按键=GPIO19 · 低电采样=GPIO0
+ *   串口/WebSerial 烧录前暂拔 GPIO20/21 两根线，烧完接回；OTA 升级不受影响
  *
  * 使用前修改下面的 WIFI_SSID / WIFI_PASS / MQTT_HOST / DEVICE_ID。
  */
@@ -168,7 +171,7 @@ void dbgDiagReply() {
   // 输出/执行类部件：真机执行动作后判健康（演示固件执行并返回占位成功）
   JsonObject led = items.createNestedObject();
   led["name"] = "led"; led["status"] = "ok"; led["code"] = (char*)NULL; led["value"] = "红→绿→蓝→灭";
-  Serial.println("[TEST] LED 自检：红→绿→蓝→灭（GPIO16/17/18 PWM）");
+  Serial.println("[TEST] LED 自检：红→绿→蓝→灭（WS2812 @ GPIO8）");
   JsonObject spk = items.createNestedObject();
   spk["name"] = "speaker"; spk["status"] = "ok"; spk["code"] = (char*)NULL; spk["value"] = "1kHz 测试音";
   Serial.println("[TEST] 喇叭自检：播放 1kHz 测试音（MAX98357A I2S）");
@@ -378,8 +381,8 @@ void dbgTestReply(const String& target) {
   } else if (target == "battery") {
     doc["value"] = "97%"; doc["voltage"] = 4.05f; doc["status"] = "ok";
   } else if (target == "led") {
-    // F5 雾面共阴 RGB（GPIO16/17/18）：依次亮红→绿→蓝→灭。真机实现 analogWrite 三路 PWM。
-    Serial.println("[TEST] LED 测试：红→绿→蓝→灭（GPIO16/17/18，接入主固件时实现 PWM）");
+    // WS2812 RGB（GPIO8 单线）：依次亮红→绿→蓝→灭。真机实现 neopixel 单线驱动。
+    Serial.println("[TEST] LED 测试：红→绿→蓝→灭（WS2812 @ GPIO8，接入主固件时实现驱动）");
     doc["value"] = "红→绿→蓝→灭"; doc["status"] = "ok";
   } else if (target == "speaker") {
     // MAX98357A I2S：播放 1kHz 测试音 0.5s。真机实现 tone/audio 播放。
@@ -544,7 +547,7 @@ void publishDiag() {
   items.add(serialized("{\"name\":\"light\",\"status\":\"ok\",\"code\":null,\"value\":340}"));
   items.add(serialized("{\"name\":\"battery\",\"status\":\"ok\",\"code\":null,\"value\":\"97%\"}"));
   // 执行类部件真实动作：LED 依次亮灭 + 喇叭播放测试嘟嘟声
-  Serial.println("[TEST] LED 自检：红→绿→蓝→灭（GPIO16/17/18 PWM）");
+  Serial.println("[TEST] LED 自检：红→绿→蓝→灭（WS2812 @ GPIO8）");
   items.add(serialized("{\"name\":\"led\",\"status\":\"ok\",\"code\":null,\"value\":\"红→绿→蓝→灭\"}"));
   Serial.println("[TEST] 喇叭自检：播放测试嘟嘟声 1kHz×3（MAX98357A I2S 输出，请留意声音）");
   items.add(serialized("{\"name\":\"speaker\",\"status\":\"ok\",\"code\":null,\"value\":\"嘟嘟声 1kHz×3\"}"));
