@@ -24,7 +24,7 @@ if [ -n "$GIT_DATA_REPO" ]; then
   if [ ! -d data/.git ]; then
     if [ -n "$(ls -A data 2>/dev/null | grep -v '^\.gitkeep$')" ]; then
       (cd data && git init -q && git config user.name "kitchen-admin" && git config user.email "kitchen-admin@render" \
-        && git add -A && git commit -qm "init data" && git branch -M "$BRANCH" && git remote add origin "$GIT_DATA_REPO") \
+        && git add -f -A . && git commit -qm "init data" && git branch -M "$BRANCH" && git remote add origin "$GIT_DATA_REPO") \
         && echo "[data] 本地数据已初始化并关联备份仓库" || echo "[data] ⚠️ 初始化失败"
     else
       rm -rf data && git clone -q -b "$BRANCH" "$GIT_DATA_REPO" data 2>/dev/null \
@@ -41,8 +41,12 @@ if [ -n "$GIT_DATA_REPO" ]; then
   (
     while true; do
       sleep "${BACKUP_INTERVAL_SEC:-300}"
-      (cd data && git add -A && git commit -qm "auto backup $(date '+%F %T')" && git push -q origin "$BRANCH") 2>>logs/backup.log \
-        || echo "$(date '+%F %T') [backup] 推送失败，下周期重试" >> logs/backup.log
+      # 每轮先确保提交身份（克隆/新建/拉取各路径都覆盖），仅当有数据变化时才提交推送
+      if (cd data && git config user.name "kitchen-admin" && git config user.email "kitchen-admin@render" \
+          && git add -f -A . && ! git diff --cached --quiet) 2>>logs/backup.log; then
+        (cd data && git commit -qm "auto backup $(date '+%F %T')" && git push -q origin "$BRANCH") 2>>logs/backup.log \
+          || echo "$(date '+%F %T') [backup] 推送失败，下周期重试" >> logs/backup.log
+      fi
     done
   ) &
   echo "[backup] 后台备份已启动，每 ${BACKUP_INTERVAL_SEC:-300}s"
