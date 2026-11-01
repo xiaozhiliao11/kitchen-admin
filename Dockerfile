@@ -4,8 +4,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# 数据备份脚本依赖 git（alpine 基础镜像默认不含）
-RUN apk add --no-cache git
+# 数据备份脚本依赖 git；render-start.sh 依赖 bash（alpine 默认只有 sh）
+RUN apk add --no-cache git bash
 
 # 先装依赖（利用缓存层）
 COPY package*.json ./

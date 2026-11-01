@@ -9,7 +9,27 @@ const path = require('path');
 const dir = path.resolve(path.dirname(process.argv[1] || __filename));
 const script = path.join(dir, 'render-start.sh');
 
-const child = spawn('bash', [script], { cwd: dir, stdio: 'inherit' });
+// 优先 bash，缺失时回退 sh（alpine 精简镜像可能无 bash）
+const shell = process.env.START_SHELL || 'bash';
+
+const child = spawn(shell, [script], { cwd: dir, stdio: 'inherit' });
+
+child.on('error', (err) => {
+  console.error(`[start] 无法启动 ${shell}: ${err.message}`);
+  if (shell !== 'sh') {
+    console.error('[start] 回退到 sh 重试');
+    const fallback = spawn('sh', [script], { cwd: dir, stdio: 'inherit' });
+    fallback.on('error', (e2) => {
+      console.error(`[start] sh 也无法启动: ${e2.message}`);
+      process.exit(1);
+    });
+    fallback.on('exit', (code, signal) => {
+      process.exit(code ?? (signal ? 1 : 0));
+    });
+    return;
+  }
+  process.exit(1);
+});
 
 ['SIGTERM', 'SIGINT', 'SIGHUP'].forEach((sig) => {
   process.on(sig, () => {
