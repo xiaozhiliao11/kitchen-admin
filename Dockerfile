@@ -4,6 +4,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# 数据备份脚本依赖 git（alpine 基础镜像默认不含）
+RUN apk add --no-cache git
+
 # 先装依赖（利用缓存层）
 COPY package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund

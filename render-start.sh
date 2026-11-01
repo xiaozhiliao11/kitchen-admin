@@ -9,6 +9,13 @@
 cd "$(dirname "$0")"
 mkdir -p data logs
 
+# 启动自检：逐项探测关键依赖，每行简短避免日志截断
+echo "[preflight] node $(node -v 2>/dev/null || echo MISS)"
+for m in express mqtt ws esptool-js ./config ./store ./workflow ./diag; do
+  if node -e "require('$m')" 2>/dev/null; then echo "[preflight] OK $m"; else echo "[preflight] MISS $m"; fi
+done
+if command -v git >/dev/null 2>&1; then echo "[preflight] git ok"; else echo "[preflight] GIT MISSING"; fi
+
 BRANCH="${GIT_DATA_BRANCH:-main}"
 
 # 数据恢复/初始化（Git 备份开启时）
