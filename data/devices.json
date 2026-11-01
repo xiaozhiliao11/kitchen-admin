@@ -1,0 +1,218 @@
+{
+  "A001": {
+    "id": "A001",
+    "meta": {
+      "name": "",
+      "note": "初始设备"
+    },
+    "createdAt": 1793525164721,
+    "lastTs": 1793531278301,
+    "online": true,
+    "lastSyncAt": "2026-11-01T11:07:58.301Z",
+    "snapshot": {
+      "id": "A001",
+      "ts": 1793531278024,
+      "state": "idle",
+      "battery": 97,
+      "fw": "1.2.0",
+      "devmode": false,
+      "last_event": null,
+      "sensors": {
+        "radar": {
+          "presence": true,
+          "dist": 151
+        },
+        "mq": 162,
+        "sht": {
+          "t": 28.023496000208436,
+          "h": 55.42897835839142
+        },
+        "mic": 0,
+        "light": 326
+      },
+      "params": {
+        "fire_detect_window": 60,
+        "fire_sigma": 5,
+        "leak_confirm_sec": 180,
+        "steam_exclude_sec": 30,
+        "remind_interval_sec": 300,
+        "stove_timeout_sec": 600,
+        "pet_confirm_sec": 900,
+        "low_battery_v": 3.4
+      },
+      "voice": {
+        "gas_leak": "检测到燃气泄漏，请立即开窗通风并关闭燃气阀门",
+        "forgot_stove": "炉灶可能忘关火了，请到厨房检查",
+        "low_battery": "电量过低，请及时充电",
+        "test_ok": "自检通过，设备运行正常"
+      },
+      "workflow_version": null,
+      "wifi_ssid": null,
+      "volume": 80
+    },
+    "state": "idle",
+    "battery": 97,
+    "fw": "1.2.0",
+    "volume": 80,
+    "sensorHealth": {
+      "radar": {
+        "presence": true,
+        "dist": 151
+      },
+      "mq": 162,
+      "sht": {
+        "t": 28.023496000208436,
+        "h": 55.42897835839142
+      },
+      "mic": 0,
+      "light": 326
+    },
+    "lastEvent": null,
+    "devmode": false,
+    "devmodeUntil": 0
+  },
+  "A002": {
+    "id": "A002",
+    "meta": {
+      "name": "",
+      "note": "初始设备"
+    },
+    "createdAt": 1793525164721,
+    "lastTs": 1793531278311,
+    "online": true,
+    "lastSyncAt": "2026-11-01T11:07:58.311Z",
+    "snapshot": {
+      "id": "A002",
+      "ts": 1793531278025,
+      "state": "idle",
+      "battery": 82,
+      "fw": "1.2.0",
+      "devmode": false,
+      "last_event": null,
+      "sensors": {
+        "radar": {
+          "presence": true,
+          "dist": 135
+        },
+        "mq": 4095,
+        "sht": {
+          "t": 27.826385372383577,
+          "h": 62.06585133207207
+        },
+        "mic": 0,
+        "light": 399
+      },
+      "params": {
+        "fire_detect_window": 60,
+        "fire_sigma": 5,
+        "leak_confirm_sec": 180,
+        "steam_exclude_sec": 30,
+        "remind_interval_sec": 300,
+        "stove_timeout_sec": 600,
+        "pet_confirm_sec": 900,
+        "low_battery_v": 3.4
+      },
+      "voice": {
+        "gas_leak": "检测到燃气泄漏，请立即开窗通风并关闭燃气阀门",
+        "forgot_stove": "炉灶可能忘关火了，请到厨房检查",
+        "low_battery": "电量过低，请及时充电",
+        "test_ok": "自检通过，设备运行正常"
+      },
+      "workflow_version": null,
+      "wifi_ssid": null,
+      "volume": 80
+    },
+    "state": "idle",
+    "battery": 82,
+    "fw": "1.2.0",
+    "volume": 80,
+    "sensorHealth": {
+      "radar": {
+        "presence": true,
+        "dist": 135
+      },
+      "mq": 4095,
+      "sht": {
+        "t": 27.826385372383577,
+        "h": 62.06585133207207
+      },
+      "mic": 0,
+      "light": 399
+    },
+    "lastEvent": null,
+    "devmode": false,
+    "devmodeUntil": 0
+  },
+  "A003": {
+    "id": "A003",
+    "meta": {
+      "name": "",
+      "note": "初始设备"
+    },
+    "createdAt": 1793525164721,
+    "lastTs": 1793531278471,
+    "online": true,
+    "lastSyncAt": "2026-11-01T11:07:58.471Z",
+    "snapshot": {
+      "id": "A003",
+      "ts": 1793531278025,
+      "state": "low_battery",
+      "battery": 28,
+      "fw": "1.2.0",
+      "devmode": false,
+      "last_event": null,
+      "sensors": {
+        "radar": {
+          "presence": false,
+          "dist": 146
+        },
+        "mq": 191,
+        "sht": {
+          "t": 28.787580378832033,
+          "h": 58.99228386007405
+        },
+        "mic": 0,
+        "light": 325
+      },
+      "params": {
+        "fire_detect_window": 60,
+        "fire_sigma": 5,
+        "leak_confirm_sec": 180,
+        "steam_exclude_sec": 30,
+        "remind_interval_sec": 300,
+        "stove_timeout_sec": 600,
+        "pet_confirm_sec": 900,
+        "low_battery_v": 3.4
+      },
+      "voice": {
+        "gas_leak": "检测到燃气泄漏，请立即开窗通风并关闭燃气阀门",
+        "forgot_stove": "炉灶可能忘关火了，请到厨房检查",
+        "low_battery": "电量过低，请及时充电",
+        "test_ok": "自检通过，设备运行正常"
+      },
+      "workflow_version": null,
+      "wifi_ssid": null,
+      "volume": 80
+    },
+    "state": "low_battery",
+    "battery": 28,
+    "fw": "1.2.0",
+    "volume": 80,
+    "sensorHealth": {
+      "radar": {
+        "presence": false,
+        "dist": 146
+      },
+      "mq": 191,
+      "sht": {
+        "t": 28.787580378832033,
+        "h": 58.99228386007405
+      },
+      "mic": 0,
+      "light": 325
+    },
+    "lastEvent": null,
+    "devmode": false,
+    "devmodeUntil": 0
+  }
+}

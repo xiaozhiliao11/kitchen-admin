@@ -19,5 +19,6 @@ ENV PORT=3000
 
 EXPOSE 3000
 
-# 前台常驻：恢复/初始化 data 并启动 Git 备份循环，再前台跑 server
-CMD ["bash", "render-start.sh"]
+# 前台常驻：以 Node 可执行文件作为唯一入口（兼容平台 prepend node 的执行方式）
+# 部署逻辑见 start.js → render-start.sh
+CMD ["./start.js"]

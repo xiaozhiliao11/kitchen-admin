@@ -1,0 +1,114 @@
+{
+  "ai": {
+    "enabled": false,
+    "endpoint": "",
+    "apiKey": "",
+    "model": "",
+    "temperature": 0.2,
+    "timeoutSec": 8
+  },
+  "workflow": [
+    {
+      "id": "scene",
+      "name": "场景触发判定",
+      "role": "trigger",
+      "enabled": true,
+      "desc": "人体→光线→温度 依次确认，全部符合才进入燃气检测（AI 判断的核心前置链）",
+      "params": {
+        "human_first": true,
+        "light_min": 20,
+        "light_max": 3000,
+        "temp_rise": 2,
+        "confirm_sec": 10,
+        "require_all": true
+      }
+    },
+    {
+      "id": "ignite",
+      "name": "点火尖峰检测",
+      "role": "trigger",
+      "enabled": true,
+      "desc": "点火瞬间传感器变化率超 5σ（60s 窗口）并回落确认，最强的“正在开火”信号",
+      "params": {
+        "window_sec": 60,
+        "sigma": 5,
+        "confirm_sec": 15,
+        "check_rate": true
+      }
+    },
+    {
+      "id": "leak",
+      "name": "燃气泄漏确认",
+      "role": "trigger",
+      "enabled": true,
+      "desc": "仅非做饭状态：MQ 读数持续超阈值 3~5 分钟才报泄漏（做饭时 MQ 高为正常燃烧）",
+      "params": {
+        "confirm_sec": 180,
+        "mq_threshold_adc": 3000,
+        "only_non_cooking": true
+      }
+    },
+    {
+      "id": "steam",
+      "name": "蒸汽排除",
+      "role": "exclude",
+      "enabled": true,
+      "desc": "湿度骤升判为蒸汽/水汽，排除泄漏误报（电水壶/高压锅场景）",
+      "params": {
+        "exclude_sec": 30,
+        "humidity_rise": 15,
+        "temp_rise": 3
+      }
+    },
+    {
+      "id": "stove_timeout",
+      "name": "防忘关火提醒（P0）",
+      "role": "trigger",
+      "enabled": true,
+      "desc": "做饭态 + 人离开：5 分钟首次提醒，10 分钟二次，之后按间隔循环；产品最高优先级",
+      "params": {
+        "remind_interval_sec": 300,
+        "timeout_sec": 600,
+        "remind_times": 3,
+        "voice_level": "high"
+      }
+    },
+    {
+      "id": "pet",
+      "name": "宠物排除",
+      "role": "exclude",
+      "enabled": true,
+      "desc": "15 分钟人类特征确认（体型/移动模式），宠物进厨房不触发提醒",
+      "params": {
+        "confirm_sec": 900,
+        "human_feature": true
+      }
+    },
+    {
+      "id": "temp_fallback",
+      "name": "温度兜底（双兜底之一）",
+      "role": "fallback",
+      "enabled": true,
+      "desc": "仅非做饭状态：温度异常持续攀升兜底告警（传感器故障时最后防线）",
+      "params": {
+        "rise_c": 5,
+        "only_non_cooking": true,
+        "threshold_abs": 60
+      }
+    },
+    {
+      "id": "baseline",
+      "name": "每日基线档案",
+      "role": "fallback",
+      "enabled": true,
+      "desc": "每日“未开火＋空闲”时自动建档（24h 双基线：温度+湿度），偏离预期曲线才判异常",
+      "params": {
+        "daily_profile": true,
+        "update_idle_only": true,
+        "window_hours": 24
+      }
+    }
+  ],
+  "workflowVersion": 1,
+  "updatedAt": 1793525164715
+}

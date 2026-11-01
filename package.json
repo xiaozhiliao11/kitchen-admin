@@ -4,7 +4,7 @@
   "description": "厨房AI安全提醒仪 · 多主机后台管理系统（0成本自建）",
   "main": "server.js",
   "scripts": {
-    "start": "bash render-start.sh",
+    "start": "./start.js",
     "simulate": "node simulate/simulate.js"
   },
   "engines": {

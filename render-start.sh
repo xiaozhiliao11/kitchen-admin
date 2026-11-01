@@ -10,9 +10,10 @@ cd "$(dirname "$0")"
 mkdir -p data logs
 
 # 启动自检：逐项探测关键依赖，每行简短避免日志截断
+# 注意：部分模块（如 store）加载后会启动常驻定时器，必须 process.exit 强制退出
 echo "[preflight] node $(node -v 2>/dev/null || echo MISS)"
 for m in express mqtt ws esptool-js ./config ./store ./workflow ./diag; do
-  if node -e "require('$m')" 2>/dev/null; then echo "[preflight] OK $m"; else echo "[preflight] MISS $m"; fi
+  if node -e "require('$m');process.exit(0)" 2>/dev/null; then echo "[preflight] OK $m"; else echo "[preflight] MISS $m"; fi
 done
 if command -v git >/dev/null 2>&1; then echo "[preflight] git ok"; else echo "[preflight] GIT MISSING"; fi
 
