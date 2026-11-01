@@ -13,7 +13,7 @@
  *
  * 接线请严格对照 V64.1 勘误 GPIO 表（2026-11-01 修正：WROOM-02/MINI-1 模组官方仅引出
  * GPIO0~10、18~21，GPIO11~17 物理不存在，原 V46 表声敏11/I2S 12-14/RGB 16-17 已废弃）：
- *   雷达=GPIO4/5 · SHT3X I2C=GPIO6(SDA)/7(SCL) · MQ ADC=GPIO3 · MQ MOS=GPIO10
+ *   雷达=GPIO4/5 · SHT3X I2C=GPIO6(SDA)/7(SCL) · MQ-4 ADC=GPIO3 · MQ-2 ADC=GPIO2(串10k+上拉) · MOS=GPIO10
  *   声敏=GPIO20(DO) · 光敏=GPIO1 · I2S=GPIO9(BCK)/18(WS)/21(DIN)
  *   RGB(WS2812)=GPIO8 · 按键=GPIO19 · 低电采样=GPIO0
  *   串口/WebSerial 烧录前暂拔 GPIO20/21 两根线，烧完接回；OTA 升级不受影响
