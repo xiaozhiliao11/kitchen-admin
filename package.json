@@ -1,0 +1,19 @@
+{
+  "name": "xiaozhiliao-kitchen-admin",
+  "version": "1.0.0",
+  "description": "厨房AI安全提醒仪 · 多主机后台管理系统（0成本自建）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "simulate": "node simulate/simulate.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "esptool-js": "^0.7.0",
+    "express": "^4.19.2",
+    "mqtt": "^5.7.0",
+    "ws": "^8.17.0"
+  }
+}

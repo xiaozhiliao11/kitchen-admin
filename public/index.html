@@ -1,0 +1,1758 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小知了厨房卫士后台</title>
+<style>
+  :root{
+    --bg:#F2F4F7; --card:#FFFFFF; --line:#DEE3E8; --text:#1F2329; --sub:#646A73;
+    --blue:#2F6FE4; --blue-l:#EAF1FE; --green:#16A34A; --green-l:#E8F7EE;
+    --red:#DC2626; --red-l:#FDEAEA; --amber:#D97706; --amber-l:#FEF4E5; --gray:#6B7280; --gray-l:#F3F4F6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:10px 18px;display:flex;align-items:center;gap:18px;position:sticky;top:0;z-index:5;flex-wrap:wrap}
+  header h1{font-size:16px;color:#1E4E8C;font-weight:700;white-space:nowrap}
+  .topnav{display:flex;gap:6px;flex-wrap:wrap}
+  .navbtn{padding:7px 16px;border-radius:8px;font-size:13px;cursor:pointer;color:var(--sub);background:var(--gray-l);border:1px solid transparent;user-select:none}
+  .navbtn:hover{color:var(--blue)}
+  .navbtn.on{background:var(--blue-l);color:var(--blue);font-weight:600;border-color:#BBD3F6}
+  .hdr-status{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--sub);flex-wrap:wrap;margin-left:auto}
+  .pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:20px;font-size:12px;background:var(--gray-l);color:var(--gray)}
+  .pill.ok{background:var(--green-l);color:var(--green)} .pill.bad{background:var(--red-l);color:var(--red)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--gray);display:inline-block}
+  .dot.ok{background:var(--green)} .dot.bad{background:var(--red)} .dot.live{background:var(--red);animation:blink 1s infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .wrap{padding:16px 18px}
+  main{max-width:1180px;margin:0 auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  .card h3{font-size:14px;margin-bottom:10px;color:#1E4E8C}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .kv{background:var(--gray-l);border-radius:8px;padding:8px 10px}
+  .kv .k{font-size:11px;color:var(--sub)} .kv .v{font-size:15px;font-weight:600;margin-top:2px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{font-size:12px;padding:3px 10px;border-radius:14px;background:var(--gray-l);color:var(--gray)}
+  .chip.ok{background:var(--green-l);color:var(--green)} .chip.err{background:var(--red-l);color:var(--red)} .chip.warn{background:var(--amber-l);color:var(--amber)}
+  button{font-size:13px;padding:7px 16px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;color:var(--text)}
+  button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  button.danger{background:var(--red);border-color:var(--red);color:#fff}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  input,select,textarea{font-size:13px;padding:6px 9px;border:1px solid var(--line);border-radius:8px;width:100%;background:#fff}
+  .frow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .fitem label{display:block;font-size:12px;color:var(--sub);margin-bottom:3px}
+  .events{list-style:none}
+  .events li{padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px;display:flex;gap:8px;align-items:baseline}
+  .events li:last-child{border-bottom:none}
+  .ev-lv{font-size:11px;padding:1px 8px;border-radius:10px;background:var(--gray-l);color:var(--gray);white-space:nowrap}
+  .ev-lv.info{background:var(--green-l);color:var(--green)} .ev-lv.warn{background:var(--amber-l);color:var(--amber)} .ev-lv.err,.ev-lv.critical{background:var(--red-l);color:var(--red)}
+  .ev-time{font-size:11px;color:var(--gray);white-space:nowrap}
+  .problist{list-style:none}
+  .problist li{border:1px solid var(--line);border-left:4px solid var(--red);border-radius:8px;padding:9px 12px;margin-bottom:8px}
+  .problist li.pass{border-left-color:var(--green)}
+  .pb-head{font-weight:600;font-size:13px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .code{background:var(--red-l);color:var(--red);font-size:11px;padding:1px 7px;border-radius:10px;font-weight:700}
+  .pb-body{margin-top:5px;font-size:12.5px;color:var(--text);line-height:1.55}
+  .pb-sub{color:var(--sub);font-size:12px}
+  .ai-box{background:var(--blue-l);border:1px solid #BBD3F6;border-radius:8px;padding:10px 12px;font-size:13px;margin-top:8px}
+  .live-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+  .devmode-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--red-l);border:1px solid #F3C1C1;border-radius:10px;padding:12px 14px;margin-bottom:14px}
+  .devmode-bar.off{background:var(--gray-l);border-color:var(--line)}
+  .muted{color:var(--sub);font-size:12px}
+  .countdown{font-size:13px;font-weight:700;color:var(--red)}
+  .note{background:var(--amber-l);border:1px solid #F5D9A8;border-radius:8px;padding:8px 12px;font-size:12px;color:#7C5A10;margin-bottom:10px}
+  .topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .topbar h2{font-size:17px}
+  .sync-tag{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:4px 12px;border-radius:18px;background:var(--gray-l);color:var(--gray);font-weight:600}
+  .sync-tag.live{background:var(--red-l);color:var(--red)}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:14px;flex-wrap:wrap}
+  .tab{padding:7px 14px;cursor:pointer;color:var(--sub);border-bottom:2px solid transparent;font-size:13px}
+  .tab.on{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
+  /* 全部设备主页 */
+  .page-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .page-head h2{font-size:18px}
+  .home-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+  .dev{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+  .dev:hover{border-color:var(--blue);box-shadow:0 2px 8px rgba(47,111,228,.08)}
+  .dev-top{display:flex;align-items:center;gap:8px;justify-content:space-between}
+  .dev-id{font-weight:700;font-size:15px}
+  .dev-name{font-size:12px;color:var(--sub);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dev-user{display:flex;gap:10px;font-size:11px;color:var(--gray);margin-top:5px;flex-wrap:wrap}
+  .badge{font-size:11px;padding:1px 8px;border-radius:12px;background:var(--gray-l);color:var(--gray);white-space:nowrap}
+  .badge.live{background:var(--red-l);color:var(--red);font-weight:600}
+  .badge.state{background:var(--amber-l);color:var(--amber)}
+  .badge.state.idle{background:var(--green-l);color:var(--green)}
+  .badge.state.off{background:var(--gray-l);color:var(--gray)}
+  .dev-meta{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:var(--sub);flex-wrap:wrap}
+  .dev-sync{font-size:11px;color:var(--gray);margin-top:6px}
+  .empty{color:var(--sub);text-align:center;padding:30px 10px;font-size:13px}
+  /* 固件/烧录页 */
+  .fwtbl{width:100%;border-collapse:collapse;font-size:13px}
+  .fwtbl th,.fwtbl td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left}
+  .fwtbl th{color:var(--sub);font-size:12px;font-weight:600;background:var(--gray-l)}
+  .logbox{background:#101418;color:#7ee787;border-radius:10px;padding:12px 14px;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.6;max-height:260px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+  .drop{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .grow{flex:1;min-width:180px}
+  /* ===== 手机端适配（窄屏 < 760px） ===== */
+  @media (max-width:760px){
+    header{gap:10px;padding:10px 12px}
+    .hdr-status{margin-left:0;width:100%}
+    .wrap{padding:12px 10px}
+    .navbtn{flex:1;text-align:center;padding:8px 4px;font-size:12px}
+    .frow{grid-template-columns:1fr}
+    .home-grid{grid-template-columns:1fr}
+    .grid{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
+    .topbar{gap:8px}
+    .topbar h2{width:100%}
+    button{padding:8px 12px}
+    .tabs{overflow-x:auto;flex-wrap:nowrap}
+    .tab{white-space:nowrap;padding:8px 12px}
+    .fwtbl{display:block;overflow-x:auto;white-space:nowrap}
+    .logbox{max-height:200px;font-size:11px}
+    .events li{flex-wrap:wrap}
+    .page-head h2{font-size:16px}
+    .dev-user{font-size:11px}
+  }
+  .wr{background:var(--green-l);border:1px solid #B7E2C3;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#14532d;margin-bottom:10px}
+  /* ================= V54 UI 统一规范（覆盖层，不改变任何功能） ================= */
+  body{line-height:1.6;letter-spacing:.01em}
+  h2{line-height:1.4}
+  .card{padding:16px 18px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  .card h3{font-size:14px;font-weight:700;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--line);color:#17355F}
+  .card h3 .hint{font-weight:400;font-size:12px;color:var(--sub);margin-left:6px}
+  .muted{line-height:1.6}
+  .row{align-items:center;gap:12px}
+  button{min-height:36px;transition:background .12s,border-color .12s,box-shadow .12s;font-weight:500}
+  button:hover{border-color:var(--blue);box-shadow:0 1px 3px rgba(47,111,228,.15)}
+  button.primary:hover{background:#2A5FC7;border-color:#2A5FC7}
+  button.danger:hover{background:#B91C1C;border-color:#B91C1C}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+  input,select,textarea{min-height:38px;transition:border-color .12s,box-shadow .12s}
+  input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(47,111,228,.12);outline:none}
+  .fitem{margin-bottom:10px}
+  .fitem label{font-size:12px;color:var(--sub);margin-bottom:5px}
+  .frow{row-gap:12px}
+  .kv{padding:9px 12px}
+  .kv .v{font-size:14px}
+  .fwtbl th{padding:10px 12px}
+  .fwtbl td{padding:10px 12px;vertical-align:middle}
+  .tab{transition:color .12s,background .12s}
+  .tab:hover{color:var(--blue);background:var(--blue-l)}
+  .note{line-height:1.6}
+  .topbar h2,.page-head h2{display:flex;align-items:center;gap:8px}
+  .events li{line-height:1.5}
+  .pb-body{line-height:1.6}
+  .logbox{font-size:12.5px;line-height:1.7}
+  /* 移动端（窄屏 < 760px）排版优化 */
+  @media (max-width:760px){
+    body{font-size:14px}
+    header{padding:10px 12px;gap:8px}
+    header h1{font-size:15px}
+    .navbtn{min-height:40px}
+    .card{padding:14px 12px;border-radius:10px;margin-bottom:12px}
+    .card h3{font-size:13.5px;margin-bottom:10px;padding-bottom:6px}
+    .topbar{margin-bottom:10px}
+    .topbar h2,.page-head h2{font-size:16px;width:100%;margin-bottom:2px}
+    .page-head .muted{width:100%}
+    .page-head{margin-bottom:12px}
+    button{min-height:42px;padding:8px 14px;font-size:13px}
+    input,select,textarea{min-height:42px;font-size:14px;padding:8px 10px}
+    .fitem label{font-size:12.5px}
+    .frow{gap:6px 10px}
+    .grid{gap:8px}
+    .kv{padding:7px 9px}
+    .kv .v{font-size:13.5px}
+    .kv .k{font-size:11px}
+    .fwtbl th,.fwtbl td{padding:8px 10px;font-size:12px}
+    .tab{padding:9px 12px;font-size:13px}
+    .events li{padding:8px 0;font-size:12.5px}
+    .note{padding:9px 12px;font-size:12.5px}
+    .muted{font-size:12.5px}
+    .home-grid{gap:10px}
+    .dev{padding:12px 12px}
+    .dev-id{font-size:14px}
+    .logbox{max-height:180px}
+    .row{gap:10px}
+    .sync-tag{font-size:12px;padding:5px 10px}
+    .devmode-bar{padding:10px 12px;gap:10px}
+  }
+  /* 传感器健康网格（V55） */
+  .sensor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .sensor-cell{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--gray-l);display:flex;flex-direction:column;gap:3px}
+  .sensor-cell.ok{border-color:#B7E2C3;background:var(--green-l)}
+  .sensor-cell.warn{border-color:#F5D9A8;background:var(--amber-l)}
+  .sensor-cell.err{border-color:#F3C1C1;background:var(--red-l)}
+  .sensor-cell .s-name{font-size:12.5px;color:var(--sub);font-weight:600}
+  .sensor-cell .s-val{font-size:14px;font-weight:700;color:var(--text);word-break:break-all}
+  .sensor-cell .s-st{font-size:11.5px;font-weight:600;color:var(--gray)}
+  .sensor-cell.ok .s-st{color:var(--green)}
+  .sensor-cell.warn .s-st{color:var(--amber)}
+  .sensor-cell.err .s-st{color:var(--red)}
+  /* 自检进展（V55） */
+  .diag-progress{list-style:none;margin-top:10px}
+  .diag-progress li{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;font-size:13px;color:var(--sub)}
+  .diag-progress li.run{background:var(--blue-l);color:var(--blue);font-weight:600}
+  .diag-progress li.ok{color:var(--green);font-weight:600}
+  .diag-progress li.err{color:var(--red);font-weight:600}
+  .diag-progress li .dp-ic{width:18px;text-align:center}
+  /* 电源控制按钮（V56） */
+  .dev-ops{display:flex;gap:6px;margin-top:8px}
+  .devop{flex:1;padding:7px 0;font-size:12.5px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);cursor:pointer;min-height:34px}
+  .devop:hover{border-color:var(--blue);color:var(--blue)}
+  .devop:disabled{opacity:.5}
+  @media (max-width:760px){.sensor-grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}.sensor-cell{padding:8px 10px}.sensor-cell .s-val{font-size:13px}.devop{min-height:42px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>小知了厨房卫士后台</h1>
+  <nav class="topnav" id="topnav">
+    <div class="navbtn on" data-view="devices">全部设备</div>
+    <div class="navbtn" data-view="flash">程序烧录</div>
+    <div class="navbtn" data-view="ai">AI 与工作流</div>
+    <div class="navbtn" data-view="debug">有线调试</div>
+  </nav>
+  <div class="hdr-status">
+    <span class="pill" id="srv"><span class="dot" id="srv-dot"></span>服务</span>
+    <span class="pill" id="mqt"><span class="dot" id="mqt-dot"></span>MQTT</span>
+    <span class="pill" id="wss"><span class="dot" id="wss-dot"></span>实时通道</span>
+  </div>
+</header>
+
+<div class="wrap"><main id="main"><div class="empty">正在加载…</div></main></div>
+
+<script>
+/* ================= 全局状态 ================= */
+let view = 'devices';        // devices | flash | ai | debug | detail
+let devices = [];
+let selId = null;
+let cur = null;              // 当前设备详情
+let ws = null;
+let countdownTimer = null;
+let devmodeEnd = 0;
+let settingsCache = null;
+let firmwares = [];
+let globalWfVersion = null;  // 全局工作流版本（AI 与工作流页保存后 +1）
+
+const $ = (s) => document.querySelector(s);
+const fmtTime = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('zh-CN', { hour12: false });
+};
+const fmtCount = (ts) => {
+  const s = Math.max(0, Math.round((ts - Date.now()) / 1000));
+  const m = Math.floor(s / 60), ss = s % 60;
+  return m + '分' + (ss < 10 ? '0' : '') + ss + '秒';
+};
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const sensorName = (k) => ({ radar: '雷达', mq: '燃气', sht: '温湿度', mic: '声敏', light: '光敏', battery: '电池', led: 'LED 灯', speaker: '喇叭' }[k] || k);
+const stShort = (s) => ({ ok: '正常', err: '故障', warn: '异常', pass: '通过' }[s] || s);
+const stText = (s) => ({ idle: '运行', run: '监测中', alert: '提醒', low_battery: '低电', unknown: '未知', offline: '离线', off: '已关机' }[s] || s);
+const LV_CN = { info: '信息', warn: '提醒', err: '故障', critical: '严重', diag: '自检', ota: '升级', wifi: '网络', system: '系统', vol: '音量' };
+const TYPE_CN = { gas_leak: '燃气泄漏', forgot_stove: '忘关火', low_battery: '低电', test_ok: '自检通过', self_test: '自检', power: '电源', boot: '开机', reboot: '重启', device: '设备', workflow: '工作流', vol: '音量' };
+const ALL_SENSORS = [
+  { k: 'radar', name: '雷达' }, { k: 'mq', name: '燃气' }, { k: 'sht', name: '温湿度' },
+  { k: 'mic', name: '声敏' }, { k: 'light', name: '光敏' }, { k: 'battery', name: '电池' },
+  { k: 'led', name: 'LED 灯' }, { k: 'speaker', name: '喇叭' }
+];
+const kv = (k, v) => '<div class="kv"><div class="k">' + k + '</div><div class="v">' + v + '</div></div>';
+
+async function api(path, opt) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 12000); // 12 秒超时：避免网络半断时界面长时间无响应
+  try {
+    const r = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal }, opt));
+    clearTimeout(t);
+    return r.json();
+  } catch (e) {
+    clearTimeout(t);
+    throw new Error('网络连接失败：服务器无响应（' + (e && e.name === 'AbortError' ? '请求超时' : (e && e.message ? e.message : '未知错误')) + '）');
+  }
+}
+
+/* ================= 视图切换 ================= */
+function setView(v) {
+  view = v;
+  document.querySelectorAll('.navbtn').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
+  if (v === 'devices') renderHome();
+  else if (v === 'flash') renderFlashPage();
+  else if (v === 'ai') renderAIPage();
+  else if (v === 'debug') renderDebugPage();
+  else if (v === 'detail') {
+    renderMain();
+    // 详情页属于「全部设备」的功能延伸：保持顶部「全部设备」高亮
+    const dbtn = document.querySelector('.navbtn[data-view="devices"]');
+    if (dbtn) dbtn.classList.add('on');
+  }
+}
+document.addEventListener('click', (e) => {
+  const nb = e.target.closest('.navbtn');
+  if (nb) setView(nb.dataset.view);
+});
+
+/* ================= 全部设备主页 ================= */
+let lastDevicesKey = ''; // 首页防重绘：列表内容无变化时跳过 innerHTML 重建
+async function loadDevices() {
+  try {
+    const data = await api('/api/devices');
+    devices = data.devices || [];
+  } catch {}
+  if (view !== 'devices') return;
+  // 只提取 devCard 实际展示的字段做比较；globalWfVersion 参与（影响 WF 徽标）
+  const key = globalWfVersion + '|' + JSON.stringify(devices.map((d) => [
+    d.id, d.name, d.devmode, d.state, d.online, d.lastSyncAt, d.battery, d.fw,
+    d.workflowVersion, d.userName, d.deviceAddr
+  ]));
+  if (key !== lastDevicesKey) { lastDevicesKey = key; renderHome(); }
+}
+
+function renderHome() {
+  const html =
+    '<div class="page-head"><h2>全部设备</h2>' +
+    '<button class="primary" id="btn-add">＋ 添加设备</button>' +
+    '<span class="muted">共 ' + devices.length + ' 台 · 点击设备卡片进入管理（开发者模式/自检/OTA/参数语音/WiFi）</span></div>' +
+    '<div class="card" id="add-card" style="display:none"></div>' +
+    (devices.length
+      ? '<div class="home-grid">' + devices.map(devCard).join('') + '</div>'
+      : '<div class="card"><div class="empty">暂无设备。请点击「添加设备」注册主机 ID，或先启动模拟器/烧录主机固件。</div></div>');
+  $('#main').innerHTML = html;
+  $('#btn-add').onclick = () => {
+    const box = $('#add-card');
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    if (box.style.display === 'block') {
+      box.innerHTML =
+        '<h3>添加设备（新主机入网登记）</h3>' +
+        '<p class="muted" style="margin-bottom:10px">设备 ID 是主机固件里 DEVICE_ID 的编码，两者一致才能收到该主机上报。留空自动生成：A+年份+日期+四位编号（当天递增，如 A202610310001）。添加后将记录当前时间为设备添加时间。</p>' +
+        '<div class="frow"><div class="fitem"><label>设备 ID（可选）</label><input id="nd-id" placeholder="留空自动生成，如 A202610310001"></div>' +
+        '<div class="fitem"><label>设备名称（可选）</label><input id="nd-name" placeholder="如 厨房主机"></div></div>' +
+        '<div class="frow"><div class="fitem"><label>使用者姓名（可选）</label><input id="nd-user" placeholder="如 张阿姨"></div>' +
+        '<div class="fitem"><label>联系电话（可选）</label><input id="nd-phone" placeholder="如 138****0000"></div></div>' +
+        '<div class="fitem" style="margin:8px 0"><label>设备地址 / 备注</label><input id="nd-addr" placeholder="安装位置，如 武汉市××小区 3-1-502 厨房"></div>' +
+        '<div class="row"><button class="primary" id="nd-ok">确认添加</button><button id="nd-cancel">取消</button></div>';
+      $('#nd-ok').onclick = addDevice;
+      $('#nd-cancel').onclick = () => { box.style.display = 'none'; };
+    }
+  };
+  document.querySelectorAll('.dev').forEach((el) => el.onclick = () => select(el.dataset.id));
+  // 电源控制：关机 / 重启 / 开机（真机执行，结果中文反馈）
+  const POWER_CN = { poweroff: '关机', reboot: '重启', poweron: '开机' };
+  document.querySelectorAll('.devop').forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    const op = b.dataset.op; const id = b.closest('.dev').dataset.id;
+    // 关机/重启会影响正在进行的检测与告警播报，二次确认
+    if (op === 'poweroff' && !confirm('确认关机设备 ' + id + '？\n关机后主机停止检测与播报（仍保留远程监听，可随时开机）。')) return;
+    if (op === 'reboot' && !confirm('确认重启设备 ' + id + '？\n配置会保留，重启期间短暂断线。')) return;
+    b.disabled = true;
+    const r = await api('/api/devices/' + id + '/power', { method: 'POST', body: JSON.stringify({ action: op }) }).catch(() => null);
+    alert(r && r.ok ? (r.warn || '已下发「' + POWER_CN[op] + '」指令，主机执行后状态将自动更新') : (r && r.error ? r.error : '下发失败：服务未连接'));
+    b.disabled = false;
+    loadDevicesDebounced();
+  });
+}
+
+function devCard(d) {
+  const live = d.devmode ? ' <span class="badge live">开发者模式·实时</span>' : '';
+  const st = d.state || 'unknown';
+  const stCls = st === 'idle' ? 'state idle' : st === 'off' ? 'state off' : 'state';
+  const wfBadge = (d.workflowVersion != null && globalWfVersion != null && Number(d.workflowVersion) !== globalWfVersion)
+    ? ' <span class="badge" style="background:var(--amber-l);color:var(--amber)">WF 落后 v' + d.workflowVersion + '→v' + globalWfVersion + '</span>' : '';
+  // 离线/已关机卡片视觉弱化：快速扫视即可分辨
+  const dim = (!d.online || st === 'off') ? ' style="opacity:.62"' : '';
+  return '<div class="dev" data-id="' + d.id + '"' + dim + '>' +
+    '<div class="dev-top"><span class="dev-id">' + esc(d.id) + '</span>' +
+    '<span class="dev-name">' + esc(d.name || '') + '</span></div>' +
+    ((d.userName || d.deviceAddr) ? '<div class="dev-user">' +
+      (d.userName ? '<span>' + esc(d.userName) + '</span>' : '') +
+      (d.deviceAddr ? '<span>' + esc(d.deviceAddr) + '</span>' : '') + '</div>' : '') +
+    '<div class="dev-meta"><span class="badge ' + stCls + '">' + stText(st) + '</span>' +
+    '<span class="badge">电量 ' + (d.battery != null ? d.battery + '%' : '—') + '</span>' +
+    '<span class="badge">FW ' + (d.fw || '—') + '</span>' +
+    (d.workflowVersion != null ? '<span class="badge">WF v' + d.workflowVersion + '</span>' : '') +
+    live + wfBadge + '</div>' +
+    '<div class="dev-sync">' + (d.online ? '<span class="dot ok"></span> 在线 · 最后同步 ' + fmtTime(d.lastSyncAt) : '<span class="dot"></span> 离线') + '</div>' +
+    '<div class="dev-ops">' +
+    '<button class="devop" data-op="poweroff">关机</button>' +
+    '<button class="devop" data-op="reboot">重启</button>' +
+    '<button class="devop" data-op="poweron">开机</button>' +
+    '</div></div>';
+}
+
+async function addDevice() {
+  const id = $('#nd-id').value.trim();
+  const name = $('#nd-name').value.trim();
+  const userName = $('#nd-user').value.trim();
+  const userPhone = $('#nd-phone').value.trim();
+  const deviceAddr = $('#nd-addr').value.trim();
+  const r = await api('/api/devices', { method: 'POST', body: JSON.stringify({ id: id || undefined, name, userName, userPhone, deviceAddr, note: deviceAddr }) }).catch(() => null);
+  if (!r || !r.ok) { alert(r && r.error ? r.error : '添加失败：网络连接失败或服务器无响应'); return; }
+  $('#add-card').style.display = 'none';
+  loadDevices();
+}
+
+/* ================= 设备详情 ================= */
+async function select(id) {
+  selId = id;
+  loadDevices();
+  const data = await api('/api/devices/' + id);
+  cur = data.device;
+  if (!cur) { setView('devices'); return; }
+  devmodeEnd = cur.devmodeUntil || 0;
+  setView('detail');
+}
+
+function backToHome() { selId = null; cur = null; setView('devices'); }
+
+function renderMain() {
+  const d = cur;
+  const live = d.devmode;
+  const online = d.online;
+  const html =
+    '<div class="topbar"><button id="btn-back">← 返回全部设备</button>' +
+    '<h2>' + esc(d.id) + (d.name ? ' · ' + esc(d.name) : '') + '</h2>' +
+    '<span class="sync-tag ' + (live ? 'live' : '') + '">' +
+    (live ? '<span class="dot live"></span>实时（开发者模式）' : (online ? '最后同步 ' + fmtTime(d.lastSyncAt) : '<span class="dot"></span>离线')) +
+    '</span>' +
+    '<button id="btn-edit">编辑信息</button>' +
+    '<button class="danger" id="btn-del">删除设备</button></div>' +
+    '<div class="card" id="edit-card" style="display:none"></div>' +
+    (live ? devmodeBar(true) : devmodeBar(false)) +
+    tabBar() +
+    '<div id="tab-body">' + tabBody('overview') + '</div>';
+  $('#main').innerHTML = html;
+  $('#btn-back').onclick = backToHome;
+  $('#btn-edit').onclick = () => {
+    const box = $('#edit-card');
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    if (box.style.display === 'block') {
+      box.innerHTML =
+        '<h3>编辑设备信息</h3>' +
+        '<div class="frow"><div class="fitem"><label>设备名称</label><input id="ed-name" value="' + esc(d.name || '') + '"></div>' +
+        '<div class="fitem"><label>使用者姓名</label><input id="ed-user" value="' + esc(d.userName || '') + '"></div></div>' +
+        '<div class="frow"><div class="fitem"><label>联系电话</label><input id="ed-phone" value="' + esc(d.userPhone || '') + '"></div>' +
+        '<div class="fitem"><label>设备地址</label><input id="ed-addr" value="' + esc(d.deviceAddr || '') + '"></div></div>' +
+        '<div class="row"><button class="primary" id="ed-ok">保存修改</button><button id="ed-cancel">取消</button></div>';
+      $('#ed-ok').onclick = async () => {
+        const body = {
+          name: $('#ed-name').value, userName: $('#ed-user').value.trim(),
+          userPhone: $('#ed-phone').value.trim(), deviceAddr: $('#ed-addr').value.trim()
+        };
+        const r = await api('/api/devices/' + d.id, { method: 'PATCH', body: JSON.stringify(body) }).catch(() => null);
+        if (!r || !r.ok) { alert(r && r.error ? r.error : '保存失败：网络连接失败或服务器无响应'); return; }
+        box.style.display = 'none';
+        select(d.id);
+      };
+      $('#ed-cancel').onclick = () => { box.style.display = 'none'; };
+    }
+  };
+  $('#btn-del').onclick = async () => {
+    if (!confirm('确认删除设备 ' + d.id + '？\n删除后该主机上报将被忽略（除非重新添加）。')) return;
+    const r = await api('/api/devices/' + d.id, { method: 'DELETE' }).catch(() => null);
+    if (!r || !r.ok) { alert(r && r.error ? r.error : '删除失败：网络连接失败或服务器无响应'); return; }
+    backToHome();
+  };
+  bindTabs();
+  if (live) startCountdown();
+}
+
+function tabBar() {
+  const tabs = [['overview','概览'],['live','实时'],['diag','自检与故障'],['events','事件'],['params','参数与语音'],['wifi','WiFi 配置'],['ota','OTA升级']];
+  return '<div class="tabs">' + tabs.map((t) => '<div class="tab" data-tab="' + t[0] + '">' + t[1] + '</div>').join('') + '</div>';
+}
+
+function devmodeBar(on) {
+  if (!on) {
+    return '<div class="devmode-bar off"><span class="muted">平时主机低功耗运行，后台显示「最后同步」状态。</span>' +
+      '<button class="primary" id="dm-on">打开开发者模式（实时）</button></div>';
+  }
+  return '<div class="devmode-bar"><span style="font-weight:700;color:var(--red)">实时模式已开启</span>' +
+    '<span class="countdown">剩余 <span id="dm-cd">' + fmtCount(devmodeEnd) + '</span></span>' +
+    '<button id="dm-off">关闭并恢复低功耗</button>' +
+    '<span class="muted">主机已切持续联网高频采样，实时逐传感器上报</span></div>';
+}
+
+/* WiFi 配置下发（设备联网） */
+function wifiTab() {
+  const snap = cur.snapshot || {};
+  const curSsid = snap.wifi_ssid || '';
+  return '<div class="card"><h3>WiFi 配置（远程下发，主机保存并连接）</h3>' +
+    '<p class="muted" style="margin-bottom:8px">' + (curSsid ? '当前主机连接：<b>' + esc(curSsid) + '</b>' : '当前主机连接：未上报') + '。下发后主机保存新 SSID/密码并重连（换网络/改密码场景）。</p>' +
+    '<div class="frow"><div class="fitem"><label>WiFi 名称（SSID）</label><input id="wf-ssid" placeholder="输入路由器名称"></div>' +
+    '<div class="fitem"><label>密码（开放网络可留空）</label><input id="wf-pass" placeholder="WiFi 密码"></div></div>' +
+    '<div style="margin-top:10px"><button class="primary" id="wf-send">下发 WiFi 配置</button></div></div>';
+}
+
+function bindTabs() {
+  document.querySelectorAll('.tab').forEach((t) => t.onclick = () => {
+    document.querySelectorAll('.tab').forEach((x) => x.classList.remove('on'));
+    t.classList.add('on');
+    $('#tab-body').innerHTML = tabBody(t.dataset.tab);
+    bindTabActions(t.dataset.tab);
+  });
+  const dmOn = $('#dm-on'); if (dmOn) dmOn.onclick = () => setDevMode(true);
+  const dmOff = $('#dm-off'); if (dmOff) dmOff.onclick = () => setDevMode(false);
+  const wfSend = $('#wf-send'); if (wfSend) wfSend.onclick = sendWifi;
+  document.querySelectorAll('.tab').forEach((t) => { if (t.dataset.tab === 'overview') t.classList.add('on'); });
+  bindTabActions('overview');
+}
+
+async function sendWifi() {
+  const ssid = $('#wf-ssid').value.trim();
+  if (!ssid) { alert('请填写 WiFi 名称'); return; }
+  const r = await api('/api/devices/' + cur.id + '/wifi', { method: 'POST', body: JSON.stringify({ ssid, pass: $('#wf-pass').value }) }).catch(() => null);
+  if (r && r.ok) alert('WiFi 配置已下发：' + ssid + '，主机收到后保存并重连');
+  else alert(r && r.error ? r.error : '下发失败：网络连接失败或服务器无响应');
+}
+
+function sensorHealthGrid(d) {
+  const sh = d.sensorHealth || {};
+  const s = (d.snapshot && d.snapshot.sensors) || {};
+  const cells = ALL_SENSORS.map((it) => {
+    const st = sh[it.k];
+    const stCls = st === 'ok' ? 'ok' : st === 'warn' ? 'warn' : st === 'err' ? 'err' : '';
+    const stTxt = st === 'ok' ? '正常' : st === 'warn' ? '异常' : st === 'err' ? '故障' : '待上报';
+    let val = '—';
+    if (it.k === 'battery') val = d.battery != null ? d.battery + '%' : '—';
+    else if (it.k === 'led' || it.k === 'speaker') val = st ? (st === 'ok' ? '动作正常' : '—') : '待测试';
+    else val = fmtSensor(it.k, s[it.k]);
+    return '<div class="sensor-cell ' + stCls + '"><div class="s-name">' + it.name + '</div>' +
+      '<div class="s-val">' + esc(String(val)) + '</div><div class="s-st">' + stTxt + '</div></div>';
+  }).join('');
+  return '<div class="sensor-grid">' + cells + '</div>';
+}
+
+/* ================= Tab 内容 ================= */
+function tabBody(tab) {
+  const d = cur;
+  if (tab === 'overview') {
+    const evs = (curEvents() || []).slice(0, 8);
+    return '<div class="card"><h3>状态概览</h3><div class="grid">' +
+      kv('当前状态', stText(d.state)) + kv('电量', d.battery != null ? d.battery + '%' : '—') +
+      kv('固件版本', d.fw || '—') + kv('工作流版本', (d.workflowVersion != null ? 'v' + d.workflowVersion + (globalWfVersion != null && Number(d.workflowVersion) !== globalWfVersion ? '（落后，将自动补发 v' + globalWfVersion + '）' : '') : '—')) +
+      kv('播报音量', d.volume != null ? d.volume + '%' : '—') + kv('设备添加时间', d.createdAt ? fmtTime(new Date(d.createdAt).toISOString()) : '—') +
+      kv('使用者', d.userName || '—') + kv('联系电话', d.userPhone || '—') +
+      kv('设备地址', d.deviceAddr || '—') + kv('在线状态', d.online ? '在线' : '离线') +
+      kv('最后同步', fmtTime(d.lastSyncAt)) + kv('最后事件', d.lastEvent || '—') + '</div></div>' +
+      '<div class="card"><h3>传感器健康</h3>' + sensorHealthGrid(d) + '</div>' +
+      '<div class="card"><h3>最近事件</h3>' + eventList(evs) + '</div>';
+  }
+  if (tab === 'live') return liveTab();
+  if (tab === 'diag') return diagTab();
+  if (tab === 'events') return '<div class="card"><h3>事件记录</h3>' + eventList(curEvents() || []) + '</div>';
+  if (tab === 'params') return paramsTab();
+  if (tab === 'wifi') return wifiTab();
+  if (tab === 'ota') return otaTab();
+  return '';
+}
+
+function curEvents() {
+  if (!cur || !cur.id) return [];
+  return window.__eventsCache && window.__eventsCache[cur.id] ? window.__eventsCache[cur.id] : [];
+}
+
+function eventList(evs) {
+  if (!evs.length) return '<div class="muted">暂无事件记录</div>';
+  return '<ul class="events">' + evs.map((e) => {
+    const lv = e.level || 'info';
+    return '<li><span class="ev-lv ' + lv + '">' + (LV_CN[lv] || lv) + '</span><span>' + esc(e.text || '') + '</span><span class="ev-time">' + fmtTime(new Date(e.ts).toISOString()) + '</span></li>';
+  }).join('') + '</ul>';
+}
+
+/* 实时 Tab */
+function liveTab() {
+  const live = cur.devmode;
+  if (!live) {
+    return '<div class="note">打开开发者模式后，这里会实时显示每项传感器的当前读数，主机将以高频采样持续上报。</div>' +
+      '<button class="primary" id="dm-on2">打开开发者模式</button>';
+  }
+  const sensors = liveSensors(cur.snapshot);
+  return '<div class="live-row">' + sensors.map((s) => '<div class="kv"><div class="k">' + s.name + '</div><div class="v" data-live="' + s.key + '">' + s.val + '</div></div>').join('') + '</div>' +
+    '<div class="muted" style="margin-top:8px">数据由主机高频实时上报，经 MQTT → WebSocket 实时刷新</div>';
+}
+function liveSensors(snap) {
+  if (!snap) return [{ key: 'none', name: '暂无数据', val: '—' }];
+  const s = snap.sensors || {};
+  const out = [];
+  ['radar','mq','sht','mic','light'].forEach((k) => out.push({ key: k, name: sensorName(k), val: fmtSensor(k, s[k]) }));
+  out.push({ key: 'battery', name: '电池', val: snap.battery != null ? snap.battery + '%' : '—' });
+  out.push({ key: 'state', name: '状态', val: stText(snap.state) });
+  return out;
+}
+function fmtSensor(k, v) {
+  if (k === 'sht') return v && v.t != null ? Number(v.t).toFixed(2) + '℃ / ' + Number(v.h).toFixed(2) + '%' : '—';
+  if (k === 'radar') return v && v.presence != null ? (v.presence ? '有人 ' + v.dist + 'cm' : '无人') : '—';
+  if (k === 'mq') return v != null ? v + '' : '—';
+  return v != null ? String(v) : '—';
+}
+
+/* 自检与故障 Tab */
+let diagAnimating = false;
+function startDiagProgress() {
+  const box = $('#diag-progress');
+  if (box) box.innerHTML = '<ul class="diag-progress">' + ALL_SENSORS.map((s) =>
+    '<li><span class="dp-ic">○</span><span class="dp-name">' + s.name + '</span><span class="dp-val"></span></li>').join('') + '</ul>';
+}
+async function onDiagResult(data) {
+  cur.lastDiag = data;
+  const box = $('#diag-progress');
+  try {
+    if (box && (data.items || []).length) {
+      diagAnimating = true;
+      await animateDiag(box, data.items);
+    }
+  } finally { diagAnimating = false; } // 动画中断（切页/切设备）也复位锁，保证后续自检刷新不被卡死
+  refreshDiag();
+}
+async function animateDiag(box, items) {
+  if (!box) return;
+  const total = Math.max(items.length, ALL_SENSORS.length);
+  for (let i = 0; i < total; i++) {
+    const li = box.children[i];
+    if (li) { li.className = 'run'; const ic = li.querySelector('.dp-ic'); if (ic) ic.textContent = '…'; }
+    await new Promise((r) => setTimeout(r, 280));
+    const it = items[i];
+    if (li) {
+      if (it) {
+        li.className = it.status === 'ok' ? 'ok' : it.status === 'warn' ? 'warn' : 'err';
+        const ic = li.querySelector('.dp-ic'); if (ic) ic.textContent = it.status === 'ok' ? '✓' : it.status === 'warn' ? '△' : '✗';
+        const nm = li.querySelector('.dp-name');
+        const nmEl = ALL_SENSORS.find((x) => x.k === it.name);
+        if (nm) nm.textContent = (nmEl ? nmEl.name : sensorName(it.name)) + (it.code ? '（' + it.code + '）' : '');
+        const vl = li.querySelector('.dp-val');
+        if (vl) vl.textContent = it.value != null ? ' · 读数 ' + esc(String(it.value)) : '';
+      } else {
+        li.className = 'ok'; const ic = li.querySelector('.dp-ic'); if (ic) ic.textContent = '✓';
+      }
+    }
+  }
+}
+function diagTab() {
+  const last = cur.lastDiag;
+  let html = '<div class="card"><h3>传感器自检（全部 8 项：雷达/燃气/温湿度/声敏/光敏/电池/LED 灯/喇叭）</h3>' +
+    '<p class="muted" style="margin-bottom:10px">点击「开始自检」后主机逐项真实检测全部传感器与执行部件：传感器真实读数、LED 灯依次亮灭、<b>喇叭播放测试嘟嘟声（1kHz，请留意声音）</b>，这里实时显示检测进展与结果。</p>' +
+    '<button class="primary" id="diag-run">开始自检</button>' +
+    '<div id="diag-progress"></div></div>';
+  if (last) {
+    const ps = last.problems || [];
+    const items = last.items || [];
+    html += '<div class="card"><h3>自检结果 · ' + (last.result === 'pass' ? '全部 8 项正常' : '发现 ' + ps.length + ' 项异常') + '</h3>' +
+      (items.length ? '<ul class="diag-progress" style="margin-bottom:10px">' + items.map((i) => {
+        const nm = ALL_SENSORS.find((x) => x.k === i.name);
+        const stCls = i.status === 'ok' ? 'ok' : i.status === 'warn' ? 'warn' : 'err';
+        const ic = i.status === 'ok' ? '✓' : i.status === 'warn' ? '△' : '✗';
+        return '<li class="' + stCls + '"><span class="dp-ic">' + ic + '</span><span class="dp-name">' + (nm ? nm.name : sensorName(i.name)) + (i.code ? '（' + i.code + '）' : '') + '</span><span class="dp-val">' + (i.value != null ? ' · 读数 ' + esc(String(i.value)) : '') + '</span></li>';
+      }).join('') + '</ul>' : '') +
+      (last.aiSummary ? '<div class="ai-box"><b>AI 综合分析：</b>' + esc(last.aiSummary) + '</div>' : '') +
+      '<ul class="problist">' + (ps.length ? ps.map((p) => {
+        return '<li class="' + (p.status === 'err' ? '' : 'pass') + '">' +
+          '<div class="pb-head"><span>' + sensorName(p.name) + '</span><span class="code">' + p.code + '</span><span class="pb-sub">' + stShort(p.status) + (p.value != null ? ' · 读数 ' + p.value : '') + '</span></div>' +
+          '<div class="pb-body"><b>原因：</b>' + esc(p.reason || '') + '</div>' +
+          '<div class="pb-body"><b>可能原因：</b>' + (p.causes || []).join('；') + '</div>' +
+          '<div class="pb-body"><b>排查建议：</b>' + esc(p.advice || '') + '</div></li>';
+      }).join('') : '<li class="pass" style="border-left-color:var(--green)"><div class="pb-head">所有传感器测试通过</div></li>') + '</ul></div>';
+  }
+  return html;
+}
+
+/* 参数与语音 Tab */
+function paramsTab() {
+  const p = (cur.snapshot && cur.snapshot.params) || {};
+  const def = {
+    fire_detect_window: p.fire_detect_window != null ? p.fire_detect_window : 60,
+    fire_sigma: p.fire_sigma != null ? p.fire_sigma : 5,
+    leak_confirm_sec: p.leak_confirm_sec != null ? p.leak_confirm_sec : 180,
+    steam_exclude_sec: p.steam_exclude_sec != null ? p.steam_exclude_sec : 30,
+    remind_interval_sec: p.remind_interval_sec != null ? p.remind_interval_sec : 300,
+    stove_timeout_sec: p.stove_timeout_sec != null ? p.stove_timeout_sec : 600,
+    pet_confirm_sec: p.pet_confirm_sec != null ? p.pet_confirm_sec : 900,
+    low_battery_v: p.low_battery_v != null ? p.low_battery_v : 3.4
+  };
+  const v = (cur.snapshot && cur.snapshot.voice) || {};
+  const voice = {
+    gas_leak: v.gas_leak || '检测到燃气泄漏，请立即开窗通风并关闭燃气阀门',
+    forgot_stove: v.forgot_stove || '炉灶可能忘关火了，请到厨房检查',
+    low_battery: v.low_battery || '电量过低，请及时充电',
+    test_ok: v.test_ok || '自检通过，设备运行正常'
+  };
+  return '<div class="card"><h3>触发参数（远程下发，主机 NVS 持久化）</h3>' +
+    '<div class="frow">' + numField('fire_detect_window', '点火检测窗口（秒）', def.fire_detect_window) +
+    numField('fire_sigma', '点火确认 σ 倍数', def.fire_sigma) +
+    numField('leak_confirm_sec', '泄漏确认时长（秒）', def.leak_confirm_sec) +
+    numField('steam_exclude_sec', '蒸汽排除窗口（秒）', def.steam_exclude_sec) +
+    numField('remind_interval_sec', '提醒间隔（秒）', def.remind_interval_sec) +
+    numField('stove_timeout_sec', '忘关火判定超时（秒）', def.stove_timeout_sec) +
+    numField('pet_confirm_sec', '宠物人类特征确认窗口（秒）', def.pet_confirm_sec) +
+    numField('low_battery_v', '低电阈值（V）', def.low_battery_v) + '</div>' +
+    '<div style="margin-top:12px"><button class="primary" id="p-save">下发触发参数</button></div></div>' +
+    '<div class="card"><h3>播报语音内容与音量</h3>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>播报音量（0~100，主机 I2S 功放真实调节）· 当前：' + (cur.volume != null ? cur.volume + '%' : '未上报') + '</label>' +
+    '<input type="range" id="v-volume" min="0" max="100" step="5" value="' + (cur.volume != null ? cur.volume : 80) + '" style="width:100%">' +
+    '<div style="font-size:12px;color:var(--sub);margin-top:2px">音量 <span id="v-volume-val">' + (cur.volume != null ? cur.volume : 80) + '</span>%</div></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>燃气泄漏话术</label><input id="v-gas_leak" value="' + esc(voice.gas_leak) + '"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>忘关火话术</label><input id="v-forgot_stove" value="' + esc(voice.forgot_stove) + '"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>低电提醒话术</label><input id="v-low_battery" value="' + esc(voice.low_battery) + '"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>自检通过话术</label><input id="v-test_ok" value="' + esc(voice.test_ok) + '"></div>' +
+    '<div class="row" style="margin-top:10px"><button class="primary" id="v-save">下发语音内容</button>' +
+    '<button id="v-vol-save">下发音量</button></div></div>';
+}
+function numField(k, label, val) {
+  return '<div class="fitem"><label>' + label + '</label><input type="number" id="p-' + k + '" value="' + val + '"></div>';
+}
+
+/* OTA Tab（从固件库选择固件下发） */
+function otaTab() {
+  return '<div class="card"><h3>远程升级固件（OTA）</h3>' +
+    '<p class="muted" style="margin-bottom:10px">主机支持双分区 OTA：后台下发固件下载地址与版本号，主机下载到备用分区、校验后切换重启。可在「程序烧录」页上传固件，这里直接选用。</p>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>选择固件库中的固件</label><select id="ota-fw">' +
+    (firmwares.length ? firmwares.map((f) => '<option value="' + f.id + '" data-ver="' + esc(f.version) + '">' + esc(f.name) + ' v' + esc(f.version) + '</option>').join('') : '<option value="">（固件库为空，请先上传）</option>') +
+    '</select></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>固件下载 URL</label><input id="ota-url" placeholder="选择固件后自动填充"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>版本号</label><input id="ota-ver" placeholder="1.3.0"></div>' +
+    '<div style="margin-top:12px"><button class="primary" id="ota-send">下发升级指令</button></div>' +
+    '<div class="note" style="margin-top:12px">当前固件版本：' + esc(cur.fw || '—') + '。升级后主机会重启并上报新版本号。</div></div>';
+}
+
+/* ================= 有线调试（USB 直连电脑，真实读写主机） ================= */
+// 原理：浏览器 WebSerial 直连 ESP32-C3 USB 串口（115200），按「有线调试协议」
+// 收发 DBG 命令。固件实现在 firmware/esp32_backend_demo.ino（DBG:ping/info/
+// sensors/status/diag/get/set/event/reset），应答为单行 JSON。所有数据来自真机串口，
+// 不经过服务器、不是前端模拟。
+const DBG_FAULT = {
+  R1: { sensor: '雷达 LD2410C', reason: '雷达 UART 无响应（超时未返回人体检测数据）', causes: ['GPIO4(RX)/GPIO5(TX) 接线断开或虚焊', '雷达供电不足', 'RX 分压（6.8k/12k）异常'], advice: '检查雷达 4 线（VCC/GND/RX/TX）与分压电阻；重新上电测试' },
+  G1: { sensor: '燃气传感器 MQ', reason: 'MQ 的 ADC 读数满量程（约 4095），信号疑似开路', causes: ['MQ AO 未接或虚焊', '×0.75 分压网络断线', 'MQ 模块未上电'], advice: '检查 MQ AO → 分压电阻 → GPIO3；确认 MQ 加热端 5V 供电' },
+  G2: { sensor: '燃气传感器 MQ', reason: '读数持续异常波动、无法稳定', causes: ['预热不足（3~5 分钟）', 'MQ 头老化', '升压 5V 抖动'], advice: '延长预热；检查 MT3608 输出；老化则更换' },
+  T1: { sensor: '温湿度 SHT3X', reason: 'I2C 无应答（地址 0x44 扫描不到）', causes: ['SDA(GPIO6)/SCL(GPIO7) 接反或断线', '缺 4.7k 上拉', '供电不足'], advice: '检查 I2C 两线与 4.7k 上拉；确认地址 0x44' },
+  M1: { sensor: '声敏传感器', reason: '无声音信号输出', causes: ['GPIO11 接线断开', '灵敏度电位器旋到最低'], advice: '检查 GPIO11；顺时针微调灵敏度电位器后重测' },
+  L1: { sensor: '光敏传感器', reason: '光敏读数异常（恒 0 或恒满量程）', causes: ['GPIO1 分压断线', '引脚虚焊', '出光窗被遮挡'], advice: '检查 GPIO1 与分压电阻；确认 φ10 乳白出光窗未堵' },
+  B1: { sensor: '电池', reason: '电量过低（电压采样 < 3.4V）', causes: ['18650 亏电', '充电未完成'], advice: '立即充电；低电期间仅保留燃气即时检测与提醒' },
+  B2: { sensor: '电池', reason: '电压采样异常（恒 0 或恒满量程）', causes: ['10k/10k 分压断线', 'GPIO0 未接'], advice: '检查电池分压网络与 GPIO0 接线（3.7V 应读约 1.85V）' },
+  S1: { sensor: '语音功放 MAX98357A', reason: 'I2S 输出异常（喇叭无声）', causes: ['喇叭接线断', '功放供电不足', 'GPIO15(SD) 未接对'], advice: '检查 GPIO12/13/14/15 与喇叭接线；确认功放供电与共地' }
+};
+const DBG_SENSOR_NAMES = { radar: '雷达', mq: '燃气', sht: '温湿度', mic: '声敏', light: '光敏', battery: '电池', led: 'LED 灯', speaker: '喇叭' };
+let dbgPort = null, dbgReader = null, dbgWriter = null, dbgLineBuf = '', dbgTimer = null, dbgPollOn = false;
+const dbgPend = [];
+
+function dbgSend(cmd) {
+  if (!dbgWriter) return Promise.reject(new Error('未连接 USB 串口，无法发送命令'));
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { const i = dbgPend.indexOf(p); if (i >= 0) dbgPend.splice(i, 1); reject(new Error('命令超时：主机 5 秒内无应答，请确认选中的是主机串口且固件支持该命令（' + cmd + '）')); }, 5000);
+    const p = { cmd, resolve: (r) => { clearTimeout(t); resolve(r); } };
+    dbgPend.push(p);
+    dbgWriter.write(cmd + '\n').catch((e) => {
+      const i = dbgPend.indexOf(p); if (i >= 0) dbgPend.splice(i, 1); clearTimeout(t);
+      const raw = e && e.message ? String(e.message) : String(e || '未知错误');
+      reject(new Error('写入串口失败：' + (raw.includes('stream is locked') ? '串口流被占用（可能刚断开，请先点「断开」再重新连接）' : raw.replace(/^[^:：]*[：:]\s*/, ''))));
+    });
+  });
+}
+
+function dbgOnLine(raw) {
+  let j = null;
+  try { j = JSON.parse(raw); } catch { return; }
+  if (!j || typeof j.dbg !== 'string') return;
+  // 用「DBG:命令字」匹配应答：发送的是 "DBG:get volume"，固件应答 dbg 字段是 "get"，
+  // 必须按命令字匹配，否则 get/set/wifi/event 等命令会永远超时。
+  const idx = dbgPend.findIndex((p) => {
+    const cmdKey = String(p.cmd).slice(4).split(' ')[0].trim(); // DBG:get volume → get
+    return cmdKey === j.dbg || p.cmd === j.dbg;
+  });
+  if (idx >= 0) { const p = dbgPend.splice(idx, 1)[0]; p.resolve(j); }
+  if (dbgPollOn && j.dbg === 'sensors' && view === 'debug') {
+    const el = $('#dbg-sensors-body'); if (el) renderDbgSensors(j.sensors || {});
+  }
+}
+
+function dbgSetStatus(phase, msg) {
+  const el = $('#dbg-status');
+  if (!el) return;
+  const map = {
+    idle: '<span class="dot"></span>未连接',
+    connecting: '<span class="dot live"></span>连接中…',
+    opened: '<span class="dot live"></span>' + (msg || 'USB 已打开，探测主机…'),
+    connected: '<span class="dot live"></span>已连接：' + (msg || '正常'),
+    error: '<span class="dot" style="background:var(--red)"></span>' + (msg || '连接失败')
+  };
+  el.innerHTML = map[phase] || msg;
+}
+
+function dbgOpenErr(e) {
+  const name = e && e.name ? e.name : '';
+  if (name === 'SecurityError') return '浏览器安全限制（需要 HTTPS 且由用户点击触发）';
+  if (name === 'NetworkError') return '串口被占用或驱动异常（可能已被其他程序打开，关闭后重试）';
+  if (name === 'InvalidStateError') return '串口已处于打开状态';
+  if (name === 'NotFoundError') return '设备不存在或已被拔出';
+  return (name ? name + '：' : '') + ((e && e.message) || '未知错误');
+}
+
+async function dbgConn() {
+  if (!navigator.serial) { dbgSetStatus('error', '当前浏览器不支持 WebSerial：请用电脑端 Chrome/Edge（HTTPS）打开。'); return; }
+  dbgSetStatus('connecting', '正在等待选择串口设备…');
+  let port;
+  try { port = await navigator.serial.requestPort(); }
+  catch (e) {
+    if (e && e.name === 'NotFoundError') dbgSetStatus('error', '未选择任何串口设备（已取消）。请点「连接 USB」后在系统弹窗中选择主机对应的串口。');
+    else dbgSetStatus('error', '请求串口失败：' + dbgOpenErr(e));
+    return;
+  }
+  try { await port.open({ baudRate: 115200 }); }
+  catch (e) { dbgSetStatus('error', '打开串口失败：' + dbgOpenErr(e)); return; }
+  dbgPort = port;
+  dbgWriter = port.writable.getWriter();
+  dbgReader = port.readable.getReader();
+  const gi = (typeof port.getInfo === 'function') ? port.getInfo() : null;
+  const usbDesc = (gi && (gi.usbVendorId || gi.usbProductId))
+    ? '（USB VID:PID ' + gi.usbVendorId.toString(16) + ':' + gi.usbProductId.toString(16) + '）' : '';
+  dbgSetStatus('opened', 'USB 已打开' + usbDesc + '，正在探测主机协议…');
+  (async () => { // 读循环：真实检测串口数据；done/error 即断开
+    const dec = new TextDecoder();
+    let closed = false;
+    while (!closed) {
+      let value, done;
+      try { ({ value, done } = await dbgReader.read()); } catch { closed = true; break; }
+      if (done) { closed = true; break; }
+      dbgLineBuf += dec.decode(value);
+      let nl;
+      while ((nl = dbgLineBuf.indexOf('\n')) >= 0) {
+        const line = dbgLineBuf.slice(0, nl).replace(/\r$/, '');
+        dbgLineBuf = dbgLineBuf.slice(nl + 1);
+        if (line.trim()) dbgOnLine(line.trim());
+      }
+    }
+    // 串口关闭/拔出：真实断开检测
+    dbgPollOn = false; stopDbgPoll();
+    dbgReader = null; try { dbgWriter && dbgWriter.release(); } catch {} dbgWriter = null;
+    dbgPort = null;
+    dbgSetStatus('error', 'USB 连接已断开（串口关闭或主机被拔出）');
+  })();
+  // 探测主机调试协议（真实应答）
+  try {
+    const ping = await dbgSend('DBG:ping');
+    if (ping && ping.ok && ping.pong) {
+      dbgSetStatus('connected', '主机已应答 · USB 链路正常');
+      dbgPollOn = true; startDbgPoll();
+      const info = await dbgSend('DBG:info').catch(() => null); if (info && info.ok) renderDbgInfo(info);
+      const st = await dbgSend('DBG:status').catch(() => null); if (st && st.ok) renderDbgStatus(st);
+      await dbgSend('DBG:event 20').catch(() => null);
+      const vol = await dbgSend('DBG:get volume').catch(() => null);
+      if (vol && vol.ok && $('#dbg-vol')) { $('#dbg-vol').value = vol.value; const vv = $('#dbg-vol-val'); if (vv) vv.textContent = vol.value; }
+    } else {
+      await dbgDisconn();
+      dbgSetStatus('error', '串口已打开但主机无应答：可能选错了串口（不是主机）、固件未含 DBG 调试协议、或波特率不匹配（应为 115200）。');
+    }
+  } catch (e) {
+    await dbgDisconn();
+    dbgSetStatus('error', '探测主机失败：' + (e.message || e) + '（确认选择的是主机 USB 串口）');
+  }
+}
+
+async function dbgDisconn() {
+  dbgPollOn = false; stopDbgPoll();
+  try { if (dbgReader) { await dbgReader.cancel(); dbgReader = null; } } catch {}
+  try { if (dbgWriter) { dbgWriter.release(); dbgWriter = null; } } catch {}
+  try { if (dbgPort) { await dbgPort.close(); dbgPort = null; } } catch {}
+  dbgSetStatus('idle');
+}
+
+function startDbgPoll() {
+  stopDbgPoll();
+  dbgTimer = setInterval(() => { if (dbgPollOn && view === 'debug') dbgSend('DBG:sensors').catch(() => {}); }, 2000);
+}
+function stopDbgPoll() { if (dbgTimer) { clearInterval(dbgTimer); dbgTimer = null; } }
+
+function renderDbgInfo(j) {
+  const rows = [['设备 ID', j.id || '—'], ['固件版本', j.fw || '—'], ['芯片', j.chip || '—'],
+    ['运行时长', (j.uptimeSec != null ? Math.round(j.uptimeSec / 60) + ' 分钟' : '—')],
+    ['剩余堆内存', (j.freeHeap != null ? j.freeHeap + ' B' : '—')],
+    ['工作流版本', j.workflowVersion || '未加载'], ['播报音量', j.volume != null ? j.volume + '%' : '—'],
+    ['WiFi 网络', j.wifiSsid || '—']];
+  const el = $('#dbg-info-grid');
+  if (el) el.innerHTML = rows.map(([k, v]) => kv(k, esc(String(v)))).join('');
+}
+
+function renderDbgStatus(j) {
+  const el = $('#dbg-status-card');
+  if (!el) return;
+  const w = j.workflow || {};
+  el.innerHTML = '<div class="grid">' + kv('主机状态', stText(j.state)) +
+    kv('开发者模式', j.devmode ? '开' : '关') + kv('做饭判定', j.cooking ? '是' : '否') +
+    kv('最近事件', esc(j.lastEvent || '—')) +
+    kv('工作流', w.loaded ? ('v' + (w.version || '—') + (w.aiEnabled ? ' · AI 开' : '')) : '未加载') + '</div>';
+}
+
+function renderDbgSensors(s) {
+  const rows = [
+    ['雷达', s.radar ? (s.radar.presence ? '有人 · ' + (s.radar.dist || 0) + 'cm' : '无人') : '—'],
+    ['燃气 MQ', s.mq != null ? s.mq : '—'],
+    ['温湿度', s.sht && s.sht.t != null ? (s.sht.t + '℃ / ' + (s.sht.h != null ? s.sht.h + '%' : '—')) : '—'],
+    ['声敏', s.mic != null ? s.mic : '—'], ['光敏', s.light != null ? s.light : '—'],
+    ['电池', s.battery != null ? s.battery + '%' : '—'],
+    ['电压', s.voltage != null ? s.voltage + 'V' : '—']];
+  const el = $('#dbg-sensors-body');
+  if (el) el.innerHTML = rows.map(([k, v]) => '<tr><td>' + k + '</td><td>' + esc(String(v)) + '</td></tr>').join('');
+}
+
+function renderDbgDiag(j) {
+  const box = $('#dbg-diag-result');
+  if (!box) return;
+  const items = j.items || [];
+  const bad = items.filter((i) => i.status !== 'ok');
+  let html = '<div class="card"><h3>自检结果 · ' + (bad.length ? '发现 ' + bad.length + ' 项异常' : '全部 8 项正常') + '</h3>';
+  if (items.length) html += '<ul class="diag-progress" style="margin-bottom:10px">' + items.map((i) => {
+    const stCls = i.status === 'ok' ? 'ok' : i.status === 'warn' ? 'warn' : 'err';
+    const ic = i.status === 'ok' ? '✓' : i.status === 'warn' ? '△' : '✗';
+    return '<li class="' + stCls + '"><span class="dp-ic">' + ic + '</span><span class="dp-name">' + (DBG_SENSOR_NAMES[i.name] || i.name) + (i.code ? '（' + i.code + '）' : '') + '</span><span class="dp-val">' + (i.value != null ? ' · 读数 ' + esc(String(i.value)) : '') + '</span></li>';
+  }).join('') + '</ul>';
+  html += '<ul class="problist">';
+  if (!bad.length) html += '<li class="pass" style="border-left-color:var(--green)"><div class="pb-head">所有传感器与执行部件测试通过</div></li>';
+  bad.forEach((i) => {
+    const f = DBG_FAULT[i.code] || {};
+    html += '<li><div class="pb-head"><span>' + (DBG_SENSOR_NAMES[i.name] || i.name) + '</span><span class="code">' + esc(i.code || '') + '</span><span class="pb-sub">' + stShort(i.status) + (i.value != null ? ' · 读数 ' + esc(String(i.value)) : '') + '</span></div>' +
+      '<div class="pb-body"><b>原因：</b>' + esc(f.reason || i.detail || '未知') + '</div>' +
+      (f.causes ? '<div class="pb-body"><b>可能原因：</b>' + esc(f.causes.join('；')) + '</div>' : '') +
+      (f.advice ? '<div class="pb-body"><b>排查建议：</b>' + esc(f.advice) + '</div>' : '') + '</li>';
+  });
+  html += '</ul></div>';
+  box.innerHTML = html;
+}
+
+function dbgTime(tsMs) {
+  if (tsMs == null) return '';
+  const s = Math.floor(tsMs / 1000);
+  const m = Math.floor(s / 60), ss = s % 60;
+  return m + ':' + (ss < 10 ? '0' : '') + ss;
+}
+
+function renderDbgEvents(j) {
+  const box = $('#dbg-events');
+  if (!box) return;
+  const evs = (j.events || []).slice().reverse(); // 倒序：最新事件排最上面
+  box.innerHTML = evs.length
+    ? '<ul class="events">' + evs.map((e) => '<li><span class="ev-time">' + dbgTime(e.ts) + '</span><span class="ev-type">' + (TYPE_CN[e.type] || esc(e.type || '')) + '</span>' + esc(e.text || '') + '</li>').join('') + '</ul>'
+    : '<p class="muted">暂无事件（启动后自动记录）</p>';
+}
+
+function renderDebugPage() {
+  const support = !!navigator.serial;
+  const html =
+    '<div class="page-head"><h2>有线调试</h2><span class="muted">USB 直连电脑 · 真实测试/查故障/烧录/版本重置（不经过服务器）</span></div>' +
+    (isMobileDevice() ? '<div class="card"><div class="note">当前为手机端：有线调试需要 USB 连接，请使用<b>电脑端 Chrome/Edge</b> 打开（USB 插主机 → 点「连接 USB」→ 浏览器弹窗选择串口）。</div></div>' : '') +
+    (!support ? '<div class="card"><div class="note">当前浏览器不支持 WebSerial：请使用<b>桌面版 Chrome/Edge</b>（HTTPS）打开本页面。</div></div>' : '') +
+    '<div class="card"><h3>USB 连接</h3><div class="row">' +
+    '<button class="primary" id="dbg-conn">连接 USB（WebSerial）</button>' +
+    '<button id="dbg-disc">断开</button>' +
+    '<span id="dbg-status"><span class="dot"></span>未连接</span></div>' +
+    '<div class="note" style="margin-top:10px">连接后浏览器会弹出串口选择框：选择主机对应的 USB 串口（如 CP2102/CH340/板载 USB）。协议 115200 8N1。数据直接从主机串口读取，服务器不介入；断开会话不影响固件。</div></div>' +
+    '<div class="card" id="dbg-info-card"><h3>设备详情（真实读取）</h3><div class="grid" id="dbg-info-grid"><div class="empty">连接 USB 后自动读取。</div></div></div>' +
+    '<div class="card" id="dbg-status-card"><h3>运行状态</h3><div class="empty">连接后自动读取。</div></div>' +
+    '<div class="card"><h3>实时传感器读数（真机采集）</h3>' +
+    '<div class="row" style="margin-bottom:10px"><span class="muted">每 2 秒通过串口读取一次（当前：<span id="dbg-poll-state">' + (dbgPollOn ? '轮询中' : '已停止') + '</span>）</span>' +
+    '<button id="dbg-poll-toggle">' + (dbgPollOn ? '停止轮询' : '开启轮询') + '</button></div>' +
+    '<table class="fwtbl"><thead><tr><th>传感器</th><th>实时读数</th></tr></thead><tbody id="dbg-sensors-body"><tr><td colspan="2" class="muted">连接后自动采集</td></tr></tbody></table></div>' +
+    '<div class="card"><h3>自检与故障排查（真机逐项测试）</h3>' +
+    '<p class="muted" style="margin-bottom:10px">向主机发送自检指令，主机<b>真实读取各传感器</b>并返回逐项结果；异常项自动给出故障码、原因分析与排查建议（基于 V46 定稿电路）。</p>' +
+    '<button class="primary" id="dbg-diag">开始真机自检</button><div id="dbg-diag-result"></div></div>' +
+    '<div class="card"><h3>单项真机测试（逐传感器定点排查）</h3>' +
+    '<p class="muted" style="margin-bottom:10px">只测某一个部件，快速定位问题（LED 测试亮红→绿→蓝→灭；喇叭测试播放 1kHz 音）。</p>' +
+    '<div class="row" style="gap:8px">' + ['radar|雷达','mq|燃气','sht|温湿度','mic|声敏','light|光敏','battery|电池','led|LED 灯','speaker|喇叭'].map((s) => {
+      const p = s.split('|'); return '<button data-test="' + p[0] + '">' + p[1] + '</button>';
+    }).join('') + '</div>' +
+    '<div id="dbg-test-result" class="muted" style="margin-top:10px"></div></div>' +
+    '<div class="card"><h3>参数与音量（USB 直写，NVS 持久化）</h3>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>播报音量（0~100）</label><input type="range" id="dbg-vol" min="0" max="100" step="5" value="80" style="width:100%"><span style="font-size:12px;color:var(--sub)">音量 <span id="dbg-vol-val">80</span>%</span></div>' +
+    '<div class="frow">' + ['fire_detect_window|点火检测窗口（秒）|60', 'fire_sigma|点火确认 σ|5', 'leak_confirm_sec|泄漏确认时长（秒）|180', 'steam_exclude_sec|蒸汽排除窗口（秒）|30', 'remind_interval_sec|提醒间隔（秒）|300', 'stove_timeout_sec|忘关火超时（秒）|600', 'pet_confirm_sec|宠物误触确认（秒）|900', 'low_battery_v|低电告警电压（V）|3.4'].map((s) => {
+      const p = s.split('|'); return '<div class="fitem"><label>' + p[1] + '</label><input id="dbg-param-' + p[0] + '" value="' + p[2] + '"></div>';
+    }).join('') + '</div>' +
+    '<div class="row" style="margin-top:10px"><button id="dbg-params-save">写入触发参数</button><button id="dbg-vol-save">下发音量</button><span class="muted">与后台远程下发等效，走 USB 串口</span></div></div>' +
+    '<div class="card"><h3>播报语音（USB 直写，NVS 持久化）</h3>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>燃气泄漏话术</label><input id="dbg-voice-gas_leak" value="检测到燃气泄漏，请立即开窗通风并关闭燃气阀门"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>忘关火话术</label><input id="dbg-voice-forgot_stove" value="炉灶可能忘关火了，请到厨房检查"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>低电提醒话术</label><input id="dbg-voice-low_battery" value="电量过低，请及时充电"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>自检通过话术</label><input id="dbg-voice-test_ok" value="自检通过，设备运行正常"></div>' +
+    '<div class="row" style="margin-top:10px"><button id="dbg-voice-save">写入语音话术</button><button id="dbg-voice-load">读取当前话术</button></div></div>' +
+    '<div class="card"><h3>检测工作流版本与 AI 开关（USB 直读直写）</h3>' +
+    '<p class="muted" style="margin-bottom:10px">查看主机当前工作流版本（与后台「AI 与工作流」全局版本对比），可直接写入指定版本与 AI 启停。</p>' +
+    '<div class="frow"><div class="fitem"><label>当前版本（读取）</label><input id="dbg-wf-cur" placeholder="连接后读取"></div>' +
+    '<div class="fitem"><label>写入版本号</label><input id="dbg-wf-new" placeholder="如 4"></div></div>' +
+    '<div class="fitem" style="margin-top:8px"><label><input type="checkbox" id="dbg-wf-ai" style="width:auto;min-height:auto;margin-right:6px">AI 检测增强开关（随版本一起写入）</label></div>' +
+    '<div class="row" style="margin-top:10px"><button id="dbg-wf-load">读取版本</button><button id="dbg-wf-save">写入版本</button></div></div>' +
+    '<div class="card"><h3>WiFi 直连配置（USB 直写，换网络/改密码）</h3>' +
+    '<div class="frow"><div class="fitem"><label>WiFi 名称（SSID）</label><input id="dbg-wifi-ssid" placeholder="输入路由器名称"></div>' +
+    '<div class="fitem"><label>密码（开放网络可留空）</label><input id="dbg-wifi-pass" placeholder="WiFi 密码"></div></div>' +
+    '<div class="row" style="margin-top:10px"><button id="dbg-wifi-save">保存并重连</button><button id="dbg-wifi-load">读取当前连接</button></div></div>' +
+    '<div class="card"><h3>设备事件日志（主机本地环形缓冲，最近 20 条）</h3><button id="dbg-events-load">刷新事件</button><div id="dbg-events"></div></div>' +
+    '<div class="card"><h3>重启与版本重置</h3>' +
+    '<div class="row" style="margin-bottom:12px;gap:12px"><button id="dbg-reboot">软重启主机（保留配置）</button>' +
+    '<button class="danger" id="dbg-reset">版本重置（恢复出厂设置）</button></div>' +
+    '<p class="muted">软重启：重启主机、保留全部配置（参数/语音/工作流/音量/WiFi）。<br/>版本重置：清除主机 NVS 全部配置（触发参数、播报语音、工作流版本、音量、WiFi 凭据）后重启，固件本体不会删除。（等价的远程方式是删除设备后重新入网）</p></div>' +
+    '<div class="card"><h3>程序烧录</h3>' +
+    '<p class="muted" style="margin-bottom:10px">有线调试可配合烧录使用：先在「程序烧录」页上传固件并真机烧录，再回到本页连接调试。</p>' +
+    '<button class="primary" id="dbg-goto-flash">前往程序烧录页</button></div>' +
+    '<div class="card"><h3>调试终端（专家模式）</h3>' +
+    '<p class="muted" style="margin-bottom:10px">手动输入任意 DBG 命令查看原始应答（如 <code>DBG:info</code> / <code>DBG:get workflow</code> / <code>DBG:set params {&quot;fire_sigma&quot;:8}</code>）。适合排查与扩展命令。</p>' +
+    '<div class="row"><input id="dbg-term-input" placeholder="输入 DBG: 命令…" style="flex:1;min-width:220px"><button id="dbg-term-send">发送</button></div>' +
+    '<pre class="logbox" id="dbg-term-out" style="margin-top:10px">（连接 USB 后可用）</pre></div>';
+  $('#main').innerHTML = html;
+  $('#dbg-conn').onclick = dbgConn;
+  $('#dbg-disc').onclick = dbgDisconn;
+  $('#dbg-poll-toggle').onclick = () => {
+    dbgPollOn = !dbgPollOn;
+    if (dbgPollOn) startDbgPoll(); else stopDbgPoll();
+    // 只更新按钮与状态文字，不重建页面：避免清空已填写的参数/语音/命令输入
+    $('#dbg-poll-toggle').textContent = dbgPollOn ? '停止轮询' : '开启轮询';
+    const ps = $('#dbg-poll-state'); if (ps) ps.textContent = dbgPollOn ? '轮询中' : '已停止';
+  };
+  $('#dbg-diag').onclick = async () => {
+    $('#dbg-diag-result').innerHTML = '<div id="dbg-diag-progress"><ul class="diag-progress">' + ALL_SENSORS.map((s) => '<li><span class="dp-ic">○</span><span class="dp-name">' + s.name + '</span><span class="dp-val"></span></li>').join('') + '</ul></div>';
+    const j = await dbgSend('DBG:diag').catch(() => null);
+    if (j && j.ok) {
+      await animateDiag($('#dbg-diag-progress'), j.items || []);
+      renderDbgDiag(j);
+    } else $('#dbg-diag-result').innerHTML = '<div class="note">自检失败：' + (j && j.error ? esc(j.error) : '未连接或超时，请先连接 USB') + '</div>';
+  };
+  const vol = $('#dbg-vol');
+  if (vol) {
+    vol.oninput = () => { const v = $('#dbg-vol-val'); if (v) v.textContent = vol.value; };
+    $('#dbg-vol-save').onclick = async () => {
+      const j = await dbgSend('DBG:set volume ' + vol.value).catch(() => null);
+      alert(j && j.ok ? '音量已写入主机 NVS：' + j.value + '%' : (j && j.error ? j.error : '未连接或超时'));
+    };
+  }
+  $('#dbg-params-save').onclick = async () => {
+    const p = {};
+    ['fire_detect_window', 'fire_sigma', 'leak_confirm_sec', 'steam_exclude_sec', 'remind_interval_sec', 'stove_timeout_sec', 'pet_confirm_sec', 'low_battery_v'].forEach((k) => {
+      const el = $('#dbg-param-' + k);
+      if (!el || el.value === '') return; // 留空 = 不修改该项（此前会把空输入写成 0，误改参数）
+      const n = Number(el.value);
+      if (!isNaN(n)) p[k] = n; // 非数字忽略，防止 NaN 下发
+    });
+    if (!Object.keys(p).length) { alert('请先填写要写入的参数值（留空的项不修改）'); return; }
+    const j = await dbgSend('DBG:set params ' + JSON.stringify(p)).catch(() => null);
+    alert(j && j.ok ? '已写入 ' + Object.keys(p).length + ' 项触发参数到主机 NVS（留空的项保持原值）' : (j && j.error ? j.error : '未连接或超时'));
+  };
+  $('#dbg-events-load').onclick = async () => {
+    const j = await dbgSend('DBG:event 20').catch(() => null);
+    if (j && j.ok) renderDbgEvents(j); else $('#dbg-events').innerHTML = '<div class="note">' + (j && j.error ? esc(j.error) : '未连接或超时') + '</div>';
+  };
+  // 单项真机测试
+  document.querySelectorAll('[data-test]').forEach((b) => b.onclick = async () => {
+    const target = b.dataset.test;
+    const out = $('#dbg-test-result');
+    b.disabled = true; // 防连点：同一测试未返回前不可重复触发
+    out.innerHTML = '正在测试 ' + (DBG_SENSOR_NAMES[target] || target) + '…';
+    const j = await dbgSend('DBG:test ' + target).catch(() => null);
+    b.disabled = false;
+    if (j && j.ok) {
+      const v = j.value != null ? (' 读数：' + esc(String(j.value))) : '';
+      const d2 = j.detail != null ? (' · 距离 ' + esc(String(j.detail)) + 'cm') : '';
+      out.innerHTML = '<span style="color:var(--green)">✓ ' + (DBG_SENSOR_NAMES[target] || target) + ' 测试通过' + v + d2 + '</span>';
+    } else out.innerHTML = '<span style="color:var(--red)">✗ 测试失败：' + (j && j.error ? esc(j.error) : '未连接或超时') + '</span>';
+  });
+  // 语音话术读写
+  $('#dbg-voice-save').onclick = async () => {
+    const voice = {};
+    ['gas_leak', 'forgot_stove', 'low_battery', 'test_ok'].forEach((k) => {
+      const el = $('#dbg-voice-' + k); if (el) voice[k] = el.value;
+    });
+    const j = await dbgSend('DBG:set voice ' + JSON.stringify(voice)).catch(() => null);
+    alert(j && j.ok ? '语音话术已写入主机 NVS' : (j && j.error ? j.error : '未连接或超时'));
+  };
+  $('#dbg-voice-load').onclick = async () => {
+    const j = await dbgSend('DBG:get voice').catch(() => null);
+    if (j && j.ok && j.value) {
+      ['gas_leak', 'forgot_stove', 'low_battery', 'test_ok'].forEach((k) => { const el = $('#dbg-voice-' + k); if (el && j.value[k] != null) el.value = j.value[k]; });
+    } else alert(j && j.error ? j.error : '未连接或超时');
+  };
+  // 工作流版本读写
+  $('#dbg-wf-load').onclick = async () => {
+    const j = await dbgSend('DBG:get workflow').catch(() => null);
+    if (j && j.ok && j.value) {
+      $('#dbg-wf-cur').value = 'v' + (j.value.version || '—');
+      const ai = $('#dbg-wf-ai');
+      if (ai && j.value.aiEnabled != null) ai.checked = !!j.value.aiEnabled;
+    } else alert(j && j.error ? j.error : '未连接或超时');
+  };
+  $('#dbg-wf-save').onclick = async () => {
+    const v = Number($('#dbg-wf-new').value);
+    if (!v && v !== 0) { alert('请输入版本号'); return; }
+    const ai = $('#dbg-wf-ai');
+    const j = await dbgSend('DBG:set workflow {"version":' + v + ',"aiEnabled":' + (ai ? ai.checked : false) + '}').catch(() => null);
+    alert(j && j.ok ? '工作流版本与 AI 开关已写入主机（v' + v + '，AI ' + (ai ? '开' : '关') + '）' : (j && j.error ? j.error : '未连接或超时'));
+  };
+  // WiFi 直写
+  $('#dbg-wifi-save').onclick = async () => {
+    const ssid = $('#dbg-wifi-ssid').value.trim();
+    const pass = $('#dbg-wifi-pass').value; // 密码不 trim：WiFi 密码可能包含首尾空格
+    if (!ssid) { alert('请输入 WiFi 名称'); return; }
+    const j = await dbgSend('DBG:wifi ' + ssid + ' ' + pass).catch(() => null);
+    alert(j && j.ok ? (j.connected ? 'WiFi 已保存并重连成功：' + ssid : 'WiFi 已保存，重连失败（主机将自动重试）') : (j && j.error ? j.error : '未连接或超时'));
+  };
+  $('#dbg-wifi-load').onclick = async () => {
+    const j = await dbgSend('DBG:get wifi').catch(() => null);
+    if (j && j.ok && j.value) {
+      $('#dbg-wifi-ssid').value = j.value.ssid || '';
+      alert('当前主机 WiFi：' + (j.value.ssid || '未设置') + ' · ' + (j.value.connected ? '已连接' : '未连接'));
+    } else alert(j && j.error ? j.error : '未连接或超时');
+  };
+  // 软重启（保留配置）
+  $('#dbg-reboot').onclick = async () => {
+    if (!confirm('确认软重启主机？（保留全部配置）')) return;
+    const j = await dbgSend('DBG:reboot').catch(() => null);
+    if (j && j.ok) { alert('已发送重启指令，主机正在重启…'); dbgDisconn(); }
+    else alert(j && j.error ? j.error : '未连接或超时');
+  };
+  // 调试终端
+  const termIn = $('#dbg-term-input');
+  const termOut = $('#dbg-term-out');
+  const termSend = async () => {
+    const line = (termIn.value || '').trim();
+    if (!line) return;
+    if (!dbgWriter) { termOut.textContent = '未连接 USB，无法发送命令。'; return; }
+    termOut.textContent += '\n> ' + line;
+    const j = await dbgSend(line).catch((e) => ({ error: e.message || String(e) }));
+    termOut.textContent += '\n' + JSON.stringify(j);
+    termOut.scrollTop = termOut.scrollHeight;
+    termIn.value = '';
+  };
+  const termSendBtn = $('#dbg-term-send');
+  if (termSendBtn) termSendBtn.onclick = termSend;
+  if (termIn) termIn.onkeydown = (e) => { if (e.key === 'Enter') termSend(); };
+  $('#dbg-reset').onclick = async () => {
+    if (!confirm('确认恢复出厂设置并重启主机？\n将清除：触发参数 / 播报语音 / 工作流版本 / 音量 / WiFi 凭据。')) return;
+    const j = await dbgSend('DBG:reset').catch(() => null);
+    if (j && j.ok) { alert('已发送恢复出厂指令，主机正在重启…'); dbgDisconn(); }
+    else alert(j && j.error ? j.error : '未连接或超时');
+  };
+  $('#dbg-goto-flash').onclick = () => setView('flash');
+}
+
+/* ================= AI 与工作流（全局整体设置） ================= */
+async function loadSettings() {
+  if (!settingsCache) settingsCache = await api('/api/settings');
+  return settingsCache;
+}
+async function loadFirmwares() {
+  try {
+    const data = await api('/api/firmwares');
+    firmwares = data.firmwares || [];
+  } catch {} // 失败保持现有列表，不阻断启动并行链
+}
+
+function renderAIPage() {
+  const html =
+    '<div class="page-head"><h2>AI 与工作流（整体设置）</h2>' +
+    '<span class="muted">修改对<b>全部设备</b>生效：保存工作流后版本 +1，再一键推送到所有主机（整体修改，非单设备）。</span></div>' +
+    '<div class="card"><h3>AI 模型配置（云端场景判断）</h3>' +
+    '<p class="muted" style="margin-bottom:10px">主机 ESP32 内存小、无法本地跑大模型：检测到可疑场景时上传传感器快照，由后台调用配置的大模型判断「是否厨房使用场景」，结果回发主机。<b>不填 Key 时自动用本地规则引擎兜底，0 成本可运行。</b></p>' +
+    '<div id="ai-form"><div class="muted">加载中…</div></div></div>' +
+    '<div class="card"><h3>检测工作流（8 步检测链路，可独立启停与调参）</h3>' +
+    '<p class="muted" style="margin-bottom:10px">当前版本：<b id="wf-ver">—</b>。</p>' +
+    '<div id="wf-form"><div class="muted">加载中…</div></div></div>' +
+    '<div class="card"><h3>试运行调试（用当前工作流模拟一次完整判定，无需真机）</h3>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>传感器快照（JSON，可改后测试）</label>' +
+    '<textarea id="test-sensors" rows="5" style="font-family:monospace">' + esc(JSON.stringify(sampleSensors(), null, 2)) + '</textarea></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>场景上下文（JSON）</label>' +
+    '<textarea id="test-ctx" rows="2" style="font-family:monospace">' + esc(JSON.stringify({ personPresent: true, cooking: false, sinceCookStartSec: 0 }, null, 1)) + '</textarea></div>' +
+    '<div style="margin-top:10px"><button class="primary" id="wf-test">运行工作流</button></div>' +
+    '<div id="test-result" style="margin-top:12px"></div></div>';
+  $('#main').innerHTML = html;
+  setTimeout(async () => {
+    try {
+      const s = await loadSettings();
+      globalWfVersion = s.workflowVersion;
+      $('#ai-form').innerHTML = aiForm(s.ai);
+      $('#wf-form').innerHTML = wfForm(s.workflow, s.workflowVersion);
+      $('#wf-ver').textContent = 'v' + s.workflowVersion;
+      bindAiActions();
+      bindWfActions();
+    } catch (e) { $('#ai-form').innerHTML = '<div class="muted">设置加载失败：' + esc(String(e)) + '</div>'; }
+  }, 0);
+}
+
+function sampleSensors() {
+  return { radar: { presence: true, dist: 80 }, mq: 120, sht: { t: 26.5, h: 58 }, mic: 0, light: 340 };
+}
+
+function aiForm(ai) {
+  return '<div class="frow">' +
+    '<div class="fitem"><label>启用云端 AI 场景判断</label><select id="ai-enabled"><option value="true"' + (ai.enabled ? ' selected' : '') + '>启用</option><option value="false"' + (!ai.enabled ? ' selected' : '') + '>关闭（用规则引擎）</option></select></div>' +
+    '<div class="fitem"><label>模型名称</label><input id="ai-model" value="' + esc(ai.model || '') + '" placeholder="如 deepseek-chat / qwen-plus"></div>' +
+    '<div class="fitem"><label>API 地址（OpenAI 兼容）</label><input id="ai-endpoint" value="' + esc(ai.endpoint || '') + '" placeholder="https://api.deepseek.com/v1/chat/completions"></div>' +
+    '<div class="fitem"><label>API Key</label><input id="ai-key" type="password" value="' + esc(ai.apiKey || '') + '" placeholder="sk-..."></div>' +
+    '<div class="fitem"><label>温度（temperature）</label><input id="ai-temp" type="number" step="0.1" value="' + ai.temperature + '"></div>' +
+    '<div class="fitem"><label>超时（秒）</label><input id="ai-timeout" type="number" value="' + ai.timeoutSec + '"></div></div>' +
+    '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">' +
+    '<button class="primary" id="ai-save">保存 AI 配置</button>' +
+    '<button id="ai-reset">恢复默认</button></div>' +
+    '<div id="ai-msg" class="muted" style="margin-top:8px"></div>';
+}
+
+function wfForm(steps, ver) {
+  return '<div id="wf-ver2" style="display:none">' + ver + '</div>' +
+    steps.map((st) => {
+      const params = Object.keys(st.params).map((k) => {
+        const v = st.params[k];
+        const val = typeof v === 'boolean'
+          ? '<select id="wp-' + st.id + '-' + k + '"><option value="true"' + (v ? ' selected' : '') + '>是</option><option value="false"' + (!v ? ' selected' : '') + '>否</option></select>'
+          : '<input type="number" id="wp-' + st.id + '-' + k + '" value="' + v + '">';
+        return '<div class="fitem"><label>' + esc(paramLabel(k)) + '</label>' + val + '</div>';
+      }).join('');
+      return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px">' +
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+        '<label style="display:flex;align-items:center;gap:5px;font-weight:600"><input type="checkbox" id="we-' + st.id + '"' + (st.enabled ? ' checked' : '') + '> ' + esc(st.name) + '</label>' +
+        '<span class="chip">' + roleText(st.role) + '</span></div>' +
+        '<div class="muted" style="margin:6px 0 8px">' + esc(st.desc) + '</div>' +
+        '<div class="frow">' + params + '</div></div>';
+    }).join('') +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+    '<button class="primary" id="wf-save">保存工作流（版本 +1）</button>' +
+    '<button id="wf-reset">恢复默认工作流</button>' +
+    '<button class="primary" id="wf-push">一键推送到全部设备</button></div>' +
+    '<div id="wf-msg" class="muted" style="margin-top:8px"></div>';
+}
+function paramLabel(k) {
+  return { human_first:'先检测人体', light_min:'光线下限', light_max:'光线上限', temp_rise:'温升阈值℃', confirm_sec:'保持确认秒', require_all:'需全部满足', window_sec:'尖峰窗口秒', sigma:'σ倍数', check_rate:'用变化速率', mq_threshold_adc:'MQ阈值', only_non_cooking:'仅非做饭态', exclude_sec:'排除窗口秒', humidity_rise:'湿度上升%', remind_interval_sec:'提醒间隔秒', timeout_sec:'无人超时秒', remind_times:'循环次数', voice_level:'播报级别', threshold_abs:'绝对温度℃', rise_c:'温升阈值℃', daily_profile:'每日建档', update_idle_only:'仅空闲更新', window_hours:'建档窗口小时' }[k] || k;
+}
+function roleText(r) { return { trigger:'触发', exclude:'排除', fallback:'兜底' }[r] || r; }
+
+function collectWf() {
+  return settingsCache.workflow.map((st) => {
+    const params = {};
+    Object.keys(st.params).forEach((k) => {
+      const el = $('#wp-' + st.id + '-' + k);
+      if (!el) return;
+      if (typeof st.params[k] === 'boolean') { params[k] = el.value === 'true'; return; }
+      if (el.value === '') { params[k] = st.params[k]; return; } // 留空 = 不修改该项，保留原值
+      const n = Number(el.value);
+      params[k] = isNaN(n) ? st.params[k] : n; // 非数字 = 保留原值，防止 NaN 入库
+    });
+    const en = $('#we-' + st.id);
+    return { id: st.id, enabled: en ? en.checked : st.enabled, params };
+  });
+}
+
+function bindAiActions() {
+  const save = $('#ai-save'); if (save) save.onclick = async () => {
+    const t = Number($('#ai-temp').value), to = Number($('#ai-timeout').value);
+    if (isNaN(t) || isNaN(to)) { $('#ai-msg').textContent = '温度与超时时间请输入数字后再保存'; return; }
+    const cfg = {
+      enabled: $('#ai-enabled').value === 'true',
+      endpoint: $('#ai-endpoint').value.trim(),
+      apiKey: $('#ai-key').value.trim(),
+      model: $('#ai-model').value.trim(),
+      temperature: t,
+      timeoutSec: to
+    };
+    const r = await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify(cfg) }).catch(() => null);
+    if (!r || !r.ok) { $('#ai-msg').textContent = (r && r.error ? r.error : '保存失败：网络连接失败或服务器无响应'); return; }
+    // 保存成功后重新读取并回显服务端真实值（越界项已被后端钳制，表单与生效值保持一致）
+    settingsCache = null;
+    try { const s = await loadSettings(); $('#ai-form').innerHTML = aiForm(s.ai); bindAiActions(); } catch {}
+    $('#ai-msg').textContent = '已保存（' + (cfg.enabled && cfg.apiKey ? '云端 AI 已启用' : '规则引擎模式，0 成本兜底') + '）';
+  };
+  const reset = $('#ai-reset'); if (reset) reset.onclick = async () => {
+    if (!confirm('确认恢复默认 AI 配置？（关闭云端 AI，使用本地规则引擎）')) return;
+    const r = await api('/api/settings/ai/reset', { method: 'POST', body: '{}' }).catch(() => null);
+    if (!r || !r.ok) { $('#ai-msg').textContent = (r && r.error ? r.error : '恢复失败：网络连接失败或服务器无响应'); return; }
+    settingsCache = null; loadSettings().then((s) => { $('#ai-form').innerHTML = aiForm(s.ai); bindAiActions(); });
+  };
+}
+
+function bindWfActions() {
+  const save = $('#wf-save'); if (save) save.onclick = async () => {
+    const r = await api('/api/settings/workflow', { method: 'PUT', body: JSON.stringify({ workflow: collectWf() }) }).catch(() => null);
+    if (!r || !r.ok) { $('#wf-msg').textContent = (r && r.error ? r.error : '保存失败：网络连接失败或服务器无响应'); return; }
+    $('#wf-msg').textContent = '已保存，当前版本 v' + r.workflowVersion + '（⚠ 保存≠下发，需点击下方“推送到全部设备”才生效）';
+    settingsCache = null; const s = await loadSettings(); globalWfVersion = s.workflowVersion; $('#wf-ver').textContent = 'v' + s.workflowVersion; loadDevices();
+  };
+  const reset = $('#wf-reset'); if (reset) reset.onclick = async () => {
+    if (!confirm('确认恢复默认工作流？\n当前自定义的 8 步参数将被覆盖为出厂默认值。')) return;
+    const r = await api('/api/settings/workflow/reset', { method: 'POST', body: '{}' }).catch(() => null);
+    if (!r || !r.ok) { $('#wf-msg').textContent = (r && r.error ? r.error : '恢复失败：网络连接失败或服务器无响应'); return; }
+    settingsCache = null; const s = await loadSettings(); globalWfVersion = s.workflowVersion; $('#wf-form').innerHTML = wfForm(s.workflow, s.workflowVersion); $('#wf-ver').textContent = 'v' + s.workflowVersion; bindWfActions(); loadDevices();
+  };
+  const push = $('#wf-push'); if (push) push.onclick = async () => {
+    const cnt = devices.length;
+    if (!confirm('确认将工作流 v' + globalWfVersion + ' 推送到全部 ' + cnt + ' 台设备？\n离线设备将在上线后自动补发。')) return;
+    const r = await api('/api/settings/workflow/push', { method: 'POST', body: '{}' }).catch(() => null);
+    if (!r || !r.ok) { $('#wf-msg').textContent = (r && r.error ? r.error : '推送失败：网络连接失败或服务器无响应'); return; }
+    settingsCache = null; await loadSettings(); globalWfVersion = settingsCache.workflowVersion;
+    await loadDevices();
+    const behind = (devices || []).filter((d) => d.workflowVersion != null && Number(d.workflowVersion) !== globalWfVersion);
+    $('#wf-msg').textContent = '已推送全部 ' + r.pushed + ' 台设备（工作流 v' + r.workflowVersion + '）' +
+      (behind.length ? ' · 其中 ' + behind.length + ' 台离线错过，上线后后台会自动补发' : ' · 全部设备已同步最新版');
+  };
+  const test = $('#wf-test'); if (test) test.onclick = async () => {
+    let sensors, context;
+    try { sensors = JSON.parse($('#test-sensors').value); context = JSON.parse($('#test-ctx').value); }
+    catch { $('#test-result').innerHTML = '<div class="note">JSON 格式错误，请检查</div>'; return; }
+    const r = await api('/api/settings/workflow/test', { method: 'POST', body: JSON.stringify({ sensors, context }) }).catch(() => null);
+    if (!r || !r.ok) { $('#test-result').innerHTML = '<div class="note">' + (r && r.error ? esc(r.error) : '运行失败：网络连接失败或服务器无响应') + '</div>'; return; }
+    $('#test-result').innerHTML = '<div class="note">判定等级：<b>' + esc(r.summary.level) + '</b> · 下一步：' + esc(r.summary.next_action) +
+      (r.summary.alerts.length ? ' · 告警：' + r.summary.alerts.join('、') : '') + '</div>' +
+      '<ul class="problist">' + r.steps.map((st) => {
+        const cls = st.result === 'pass' ? 'pass' : '';
+        const tag = st.result === 'alert' ? '<span class="code">告警</span>' : st.result === 'fail' ? '<span class="code">未通过</span>' : '<span class="chip">' + st.result + '</span>';
+        return '<li class="' + cls + '"><div class="pb-head"><span>' + esc(st.name) + '</span>' + tag + '</div>' +
+          '<div class="pb-sub">' + esc(st.reason) + '</div></li>';
+      }).join('') + '</ul>';
+  };
+}
+
+/* ================= 程序烧录页（固件上传 + 真烧录 + OTA） ================= */
+function renderFlashPage() {
+  $('#main').innerHTML =
+    '<div class="page-head"><h2>程序烧录</h2>' +
+    '<span class="muted">上传固件到固件库 → 通过 OTA 远程升级，或连接 ESP32 用浏览器直刷（WebSerial）。</span></div>' +
+    '<div class="card"><h3>① 上传固件到固件库</h3>' +
+    '<div class="drop"><input type="file" id="fw-file" accept=".bin"><div class="grow"><input id="fw-ver" placeholder="版本号，如 1.3.0"></div>' +
+    '<div class="grow"><input id="fw-note" placeholder="备注，如 双分区OTA版"></div>' +
+    '<button class="primary" id="fw-up">上传</button></div>' +
+    '<div id="fw-msg" class="muted" style="margin-top:8px"></div></div>' +
+    '<div class="card"><h3>② 固件库</h3><div id="fw-list"><div class="muted">加载中…</div></div></div>' +
+    '<div class="card"><h3>③ 真机烧录（USB 直连，浏览器 WebSerial）</h3>' +
+    (isMobileDevice()
+      ? '<div class="note">当前为手机端：WebSerial 真机烧录需要 USB 连接，请使用<b>电脑端 Chrome/Edge</b> 打开本后台操作（烧录、连接串口、上传大固件等）。手机端可正常使用设备管理、事件查看、参数语音下发等其它功能。</div>'
+      : (!navigator.serial ? '<div class="note">当前浏览器不支持 WebSerial：请使用<b>桌面版 Chrome/Edge</b> 打开（并确保页面为 HTTPS）。</div>' : '')) +
+    '<div class="wr">需要：Chrome/Edge 浏览器 · 电脑 USB 接 ESP32-C3（或任意 ESP32 开发板）· 使用 <b>合并后的整片固件</b>（Arduino 导出为 merged bin / ESP-IDF merge_bin，烧录地址 0x00000）。烧录不经过服务器，数据只在浏览器与设备间传输。<br/><b>烧录保护</b>：点击「连接设备」后会先识别串口芯片与主机固件（DBG 协议探测），<b>仅当确认为本设计（小知了厨房卫士）设备时才允许烧录</b>；未识别到会给出中文原因并拒绝，避免误刷其它设备。<br/><b>中断恢复</b>：烧录中断（USB 拔出/页面关闭）不会损坏芯片——ESP32 内置 ROM 引导，重新连接并再次烧录即可恢复。</div>' +
+    '<div class="row" style="margin-bottom:10px">' +
+    '<div class="grow"><select id="fl-fw">' + fwSelectOptions() + '</select></div>' +
+    '<div class="grow"><select id="fl-size"><option>4MB</option><option>8MB</option><option>16MB</option><option>2MB</option></select></div>' +
+    '<div class="grow"><select id="fl-baud"><option value="921600">波特率 921600（默认）</option><option value="460800">460800（兼容老串口芯片）</option><option value="115200">115200（最稳）</option></select></div>' +
+    '<button class="primary" id="fl-connect">连接设备（选串口）</button>' +
+    '<button id="fl-burn" disabled>开始烧录</button></div>' +
+    '<div class="logbox" id="fl-log">（操作日志会显示在这里。若上次烧录中断，重新连接后再次烧录即可。）</div></div>';
+  $('#fw-up').onclick = uploadFirmware;
+  $('#fl-connect').onclick = connectPort;
+  $('#fl-burn').onclick = burnFirmware;
+  loadFirmwares().then(renderFwList);
+}
+
+function fwSelectOptions() {
+  return firmwares.length
+    ? firmwares.map((f) => '<option value="' + f.id + '">' + esc(f.name) + ' v' + esc(f.version) + '（' + fmtSize(f.size) + '）</option>').join('')
+    : '<option value="">（固件库为空，请先上传）</option>';
+}
+
+/* 手机端检测：移动设备部分功能（WebSerial 烧录等）需电脑端操作 */
+function isMobileDevice() {
+  return /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent || '');
+}
+
+function fmtSize(n) {
+  if (!n) return '0B';
+  if (n > 1048576) return (n / 1048576).toFixed(1) + 'MB';
+  if (n > 1024) return (n / 1024).toFixed(1) + 'KB';
+  return n + 'B';
+}
+
+async function uploadFirmware() {
+  const file = $('#fw-file').files[0];
+  const version = $('#fw-ver').value.trim() || '0.0.0';
+  const note = $('#fw-note').value.trim();
+  if (!file) { $('#fw-msg').textContent = '请先选择 .bin 固件文件'; return; }
+  $('#fw-up').disabled = true; $('#fw-up').textContent = '上传中…';
+  try {
+    const r = await fetch('/api/firmwares/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', 'X-Fw-Name': file.name.replace(/\.bin$/i, ''), 'X-Fw-Version': version, 'X-Fw-Note': note },
+      body: file
+    });
+    const j = await r.json();
+    if (j.ok) { $('#fw-msg').textContent = '上传成功：' + j.firmware.name + ' v' + j.firmware.version + '（' + fmtSize(j.firmware.size) + '）'; await loadFirmwares(); renderFwList(); $('#fl-fw').innerHTML = fwSelectOptions(); }
+    else $('#fw-msg').textContent = '上传失败：' + (j.error || '');
+  } catch (e) { $('#fw-msg').textContent = '上传失败：' + e.message; }
+  $('#fw-up').disabled = false; $('#fw-up').textContent = '上传';
+}
+
+function renderFwList() {
+  const box = $('#fw-list');
+  if (!box) return;
+  if (!firmwares.length) { box.innerHTML = '<div class="muted">暂无固件，请先上传。</div>'; return; }
+  box.innerHTML = '<table class="fwtbl"><thead><tr><th>固件</th><th>版本</th><th>大小</th><th>上传时间</th><th>操作</th></tr></thead><tbody>' +
+    firmwares.map((f) => '<tr><td>' + esc(f.name) + (f.note ? '<div class="muted">' + esc(f.note) + '</div>' : '') + '</td>' +
+      '<td>v' + esc(f.version) + '</td><td>' + fmtSize(f.size) + '</td><td>' + fmtTime(new Date(f.uploadedAt).toISOString()) + '</td>' +
+      '<td style="white-space:nowrap"><button data-act="dl" data-id="' + f.id + '">下载</button> ' +
+      '<button data-act="del" data-id="' + f.id + '">删除</button></td></tr>').join('') + '</tbody></table>';
+  box.querySelectorAll('button[data-act]').forEach((b) => b.onclick = async () => {
+    const id = b.dataset.id;
+    if (b.dataset.act === 'dl') { window.open(location.origin + '/api/firmwares/' + id + '/download', '_blank'); return; }
+    if (confirm('确认删除该固件？')) {
+      await api('/api/firmwares/' + id, { method: 'DELETE' });
+      await loadFirmwares(); renderFwList(); const s = $('#fl-fw'); if (s) s.innerHTML = fwSelectOptions();
+    }
+  });
+}
+
+/* ---- 真机烧录（WebSerial + esptool-js，仅支持本设计设备） ---- */
+let flashPort = null;
+let flashLoader = null;
+let flashProbe = null; // 预检通过的设备信息
+const SUPPORTED_USB = {
+  '10c4:ea60': 'CP210x 系列（本设计常用，如 CP2102/CP2104）',
+  '1a86:7523': 'CH340 系列（常用 USB 转串口）',
+  '1a86:7522': 'CH341 系列',
+  '1a86:55d4': 'CH9102 系列',
+  '303a:1001': 'ESP32-C3 原生 USB（本设计主芯片）',
+  '303a:1000': 'ESP32-S3 原生 USB',
+  '303a:0001': 'ESP32-C3 原生 USB',
+  '10c4:ea70': 'CP2105 系列',
+  '2341:0043': 'Arduino Mega 2560 板载'
+};
+function flLog(t) {
+  const box = $('#fl-log');
+  if (!box) return;
+  box.textContent += t + '\n';
+  box.scrollTop = box.scrollHeight;
+}
+// 预检：115200 打开串口 → 发 DBG:ping/info 探测是否为小知了厨房卫士主机
+async function probeDbgOnPort(port) {
+  const enc = new TextEncoder();
+  let w = null, r = null;
+  try {
+    w = port.writable.getWriter();
+    await w.write(enc.encode('DBG:ping\n'));
+    w.releaseLock(); w = null;
+    r = port.readable.getReader();
+    let buf = '';
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      const { value, done } = await r.read();
+      if (done) break;
+      buf += new TextDecoder().decode(value);
+      const line = buf.split('\n').find((l) => l.indexOf('pong') >= 0);
+      if (line) { r.releaseLock(); r = null; return true; }
+    }
+  } catch (e) { try { if (w) w.releaseLock(); } catch (_) {} }
+  try { if (r) { await r.cancel(); r.releaseLock(); } } catch (_) {}
+  return false;
+}
+async function readDbgInfo(port, timeoutMs) {
+  // 发 info 并读取一整行 JSON（timeoutMs 内）
+  const enc = new TextEncoder();
+  const w = port.writable.getWriter();
+  await w.write(enc.encode('DBG:info\n'));
+  w.releaseLock();
+  const r = port.readable.getReader();
+  let buf = '';
+  const deadline = Date.now() + (timeoutMs || 2500);
+  try {
+    while (Date.now() < deadline) {
+      const { value, done } = await r.read();
+      if (done) break;
+      buf += new TextDecoder().decode(value);
+      const nl = buf.indexOf('\n');
+      if (nl >= 0) {
+        const line = buf.slice(0, nl).trim();
+        if (line.startsWith('{')) { r.releaseLock(); try { const j = JSON.parse(line); return j; } catch { return null; } }
+      }
+    }
+  } catch (e) {}
+  try { await r.cancel(); } catch (_) {}
+  return null;
+}
+async function connectPort() {
+  if (!navigator.serial) { flLog('✗ 当前浏览器不支持 WebSerial。请使用 Chrome 或 Edge（桌面版），并确保页面是 HTTPS。'); return; }
+  const btn = $('#fl-connect');
+  if (btn) { btn.disabled = true; btn.textContent = '连接中…'; }
+  try {
+    await doConnectPort();
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '连接设备（选串口）'; }
+  }
+}
+async function doConnectPort() {
+  const baud = Number($('#fl-baud') ? $('#fl-baud').value : 921600) || 921600;
+  let port = null;
+  try {
+    // 第一步：选择串口并识别 USB 芯片
+    port = await navigator.serial.requestPort();
+    const info = (port.getInfo && typeof port.getInfo === 'function') ? port.getInfo() : {};
+    const vid = ((info.usbVendorId || 0) & 0xffff).toString(16).padStart(4, '0');
+    const pid = ((info.usbProductId || 0) & 0xffff).toString(16).padStart(4, '0');
+    const usbKey = vid + ':' + pid;
+    const chipName = SUPPORTED_USB[usbKey];
+    flLog('① 串口芯片识别：' + (chipName ? ('识别为「' + chipName + '」（VID:PID ' + usbKey + '）') : ('未知芯片（VID:PID ' + usbKey + '）')));
+    if (!chipName) {
+      flLog('✗ 未识别到本设计支持的串口芯片（支持：CP210x / CH340 / CH341 / CH9102 / ESP32 原生 USB）。');
+      flLog('  请检查：数据线是否损坏、驱动是否安装、是否选错了串口。为保护设备，已拒绝进入烧录。');
+      try { await port.close(); } catch (_) {}
+      return;
+    }
+    // 第二步：115200 探测 DBG 调试协议（小知了厨房卫士主机固件标识）
+    await port.open({ baudRate: 115200 });
+    flLog('② 正在探测主机固件（DBG 调试协议，115200）…');
+    const ok = await probeDbgOnPort(port);
+    if (!ok) {
+      flLog('✗ 串口已打开，但未探测到本设计固件（DBG 协议无应答）。');
+      flLog('  可能原因：选错了串口（不是主机）、固件不是本设计（小知了厨房卫士）、或主机处于烧录模式。');
+      flLog('  为保护设备，已拒绝烧录。请确认后重试。');
+      try { await port.close(); } catch (_) {}
+      return;
+    }
+    const infoJ = await readDbgInfo(port);
+    if (infoJ && infoJ.ok) {
+      flashProbe = infoJ;
+      flLog('③ 已识别设备：');
+      flLog('   设备 ID：' + (infoJ.id || '—'));
+      flLog('   固件版本：' + (infoJ.fw || '—') + ' · 芯片：' + (infoJ.chip || '—'));
+      flLog('   运行时长：' + (infoJ.uptimeSec != null ? Math.round(infoJ.uptimeSec / 60) + ' 分钟' : '—') + ' · 工作流：' + (infoJ.workflowVersion ? 'v' + infoJ.workflowVersion : '未设置'));
+      flLog('✓ 确认为小知了厨房卫士主机，支持烧录。正在建立烧录通道…');
+    } else {
+      flLog('! 已探测到 DBG 协议但 info 读取异常，按本设计设备继续（芯片 ' + chipName + '）。');
+    }
+    try { await port.close(); } catch (_) {}
+    // 第三步：正式烧录通道（esptool，目标波特率）
+    const { ESPLoader, Transport } = await import('/vendor/esptool-js/bundle.js');
+    await port.open({ baudRate: baud });
+    const transport = new Transport(port, true);
+    const loader = new ESPLoader({
+      transport,
+      baudrate: baud,
+      terminal: { clean() {}, write(d) { flLog(String(d)); }, onLine(l) { flLog(String(l)); } },
+      debug: false
+    });
+    await loader.main('default_reset');
+    flLog('✓ 烧录通道已建立（波特率 ' + baud + '），检测到芯片：' + loader.chip + '（' + loader.flashSize + '）');
+    flashPort = port; flashLoader = loader;
+    $('#fl-burn').disabled = false;
+    $('#fl-connect').textContent = '已连接 ' + loader.chip + '（可重新选择）';
+  } catch (e) {
+    if (port) { try { await port.close(); } catch (_) {} }
+    const msg = String(e && e.message || e);
+    flLog('✗ 连接失败：' + (msg.indexOf('cancel') >= 0 ? '你取消了选择串口' : msg));
+  }
+}
+async function burnFirmware() {
+  const fwId = $('#fl-fw').value;
+  if (!fwId) { flLog('✗ 请先在固件库上传/选择一个固件'); return; }
+  const fw = firmwares.find((f) => f.id === fwId);
+  if (!fw) return;
+  if (!flashLoader) { flLog('✗ 请先点击「连接设备」'); return; }
+  const flashSize = $('#fl-size').value;
+  flLog('→ 下载固件 ' + fw.name + ' v' + fw.version + '（' + fmtSize(fw.size) + '）…');
+  try {
+    const r = await fetch('/api/firmwares/' + fwId + '/download');
+    const buf = await r.arrayBuffer();
+    const data = new Uint8Array(buf);
+    flLog('→ 已载入 ' + data.length + ' 字节，开始擦除并写入（地址 0x00000，Flash ' + flashSize + '）…');
+    $('#fl-burn').disabled = true;
+    await flashLoader.writeFlash({ fileArray: [{ data, address: 0x0 }], flashSize, eraseAll: true, compress: true });
+    flLog('✓ 写入完成！正在硬复位…');
+    await flashLoader.after('hard_reset');
+    flLog('✓ 烧录成功，设备已重启。可断开 USB，或在“全部设备”中等待该设备上线（如需重新烧录可再次连接）。');
+    $('#fl-burn').disabled = false; // 成功后允许再次连接重烧
+    if (flashPort) { try { await flashPort.close(); } catch (_) {} flashPort = null; }
+  } catch (e) {
+    flLog('✗ 烧录失败：' + e.message);
+    flLog('  恢复方法：重新点击「连接设备」→ 选择同一串口 → 再次「开始烧录」。ESP32 内置 ROM 引导，中断不影响芯片本身。');
+    $('#fl-burn').disabled = false;
+  }
+}
+
+/* ================= Tab 交互 ================= */
+function bindTabActions(tab) {
+  if (tab === 'live') {
+    const dm2 = $('#dm-on2'); if (dm2) dm2.onclick = () => setDevMode(true);
+  }
+  if (tab === 'diag') {
+    const b = $('#diag-run'); if (b) b.onclick = async () => {
+      b.disabled = true; b.textContent = '正在自检全部传感器…';
+      startDiagProgress();
+      const r = await api('/api/devices/' + cur.id + '/diag', { method: 'POST', body: '{}' }).catch(() => null);
+      // 设备离线：立即提示并恢复按钮，不再空等 20 秒
+      if (r && r.warn) {
+        b.disabled = false; b.textContent = '开始自检';
+        alert(r.warn + '（自检结果需主机在线才能返回）');
+        return;
+      }
+      setTimeout(() => { if (!cur.lastDiag || !$('#diag-progress') || !$('#diag-progress').children.length) { b.disabled = false; b.textContent = '开始自检'; } }, 20000);
+    };
+  }
+  if (tab === 'params') {
+    const pSave = $('#p-save'); if (pSave) pSave.onclick = async () => {
+      const params = {};
+      ['fire_detect_window','fire_sigma','leak_confirm_sec','steam_exclude_sec','remind_interval_sec','stove_timeout_sec','pet_confirm_sec','low_battery_v'].forEach((k) => {
+        const el = $('#p-' + k);
+        if (!el || el.value === '') return; // 留空 = 不修改该项（此前会把空输入写成 0，误改参数）
+        const n = Number(el.value);
+        if (!isNaN(n)) params[k] = n; // 非数字忽略，防止 NaN 下发
+      });
+      if (!Object.keys(params).length) { alert('请先填写要下发的参数值（留空的项不修改）'); return; }
+      const r = await api('/api/devices/' + cur.id + '/params', { method: 'POST', body: JSON.stringify({ params }) }).catch(() => null);
+      alert(r && r.ok ? (r.warn || '触发参数已下发，主机 NVS 持久化保存（越界值已自动按范围校准）') : (r && r.error ? r.error : '下发失败：服务未连接'));
+      // 回填实际生效值（后端已按范围钳制，表单与真实值保持一致）
+      if (r && r.ok && r.params) {
+        Object.keys(r.params).forEach((k) => { const el = $('#p-' + k); if (el && el.value !== '') el.value = r.params[k]; });
+      }
+      loadDevicesDebounced();
+    };
+    const vSave = $('#v-save'); if (vSave) vSave.onclick = async () => {
+      const voice = {};
+      ['gas_leak','forgot_stove','low_battery','test_ok'].forEach((k) => {
+        const el = $('#v-' + k); if (el) voice[k] = el.value;
+      });
+      const r = await api('/api/devices/' + cur.id + '/voice', { method: 'POST', body: JSON.stringify({ voice }) }).catch(() => null);
+      alert(r && r.ok ? (r.warn || '语音话术已下发，主机将按新话术播报') : (r && r.error ? r.error : '下发失败：服务未连接'));
+      loadDevicesDebounced();
+    };
+    const volEl = $('#v-volume');
+    if (volEl) {
+      volEl.oninput = () => { const v = $('#v-volume-val'); if (v) v.textContent = volEl.value; };
+      const volSave = $('#v-vol-save');
+      if (volSave) volSave.onclick = async () => {
+        const r = await api('/api/devices/' + cur.id + '/volume', { method: 'POST', body: JSON.stringify({ volume: Number(volEl.value) }) });
+        alert(r.ok ? '音量指令已下发：' + volEl.value + '%（主机 I2S 功放将真实调整）' : (r.error || '下发失败'));
+      };
+    }
+  }
+  if (tab === 'wifi') {
+    const wfSend = $('#wf-send'); if (wfSend) wfSend.onclick = sendWifi;
+  }
+  if (tab === 'ota') {
+    const fwSel = $('#ota-fw');
+    if (fwSel) fwSel.onchange = () => {
+      const opt = fwSel.selectedOptions[0];
+      if (opt && opt.value) {
+        $('#ota-url').value = location.origin + '/api/firmwares/' + opt.value + '/download';
+        $('#ota-ver').value = opt.dataset.ver || '';
+      }
+    };
+    const b = $('#ota-send'); if (b) b.onclick = async () => {
+      const url = $('#ota-url').value.trim(), version = $('#ota-ver').value.trim();
+      if (!url || !version) { alert('请填写固件 URL 和版本号（或在固件库选择）'); return; }
+      const r = await api('/api/devices/' + cur.id + '/ota', { method: 'POST', body: JSON.stringify({ url, version }) }).catch(() => null);
+      alert(r && r.ok ? (r.warn || 'OTA 指令已下发：v' + version) : (r && r.error ? r.error : '下发失败：服务未连接'));
+    };
+  }
+}
+
+async function setDevMode(on) {
+  await api('/api/devices/' + cur.id + '/devmode', { method: 'POST', body: JSON.stringify({ on }) });
+  const data = await api('/api/devices/' + cur.id);
+  cur = data.device;
+  devmodeEnd = cur.devmodeUntil || 0;
+  renderMain();
+  if (on) startCountdown();
+  loadDevices();
+}
+
+function startCountdown() {
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdownTimer = setInterval(() => {
+    const el = $('#dm-cd');
+    if (!el) { clearInterval(countdownTimer); countdownTimer = null; return; }
+    if (Date.now() >= devmodeEnd) { setDevMode(false); return; }
+    el.textContent = fmtCount(devmodeEnd);
+  }, 1000);
+}
+
+/* ================= WebSocket 实时 ================= */
+let ldTimer = null;
+function loadDevicesDebounced() {
+  if (ldTimer) clearTimeout(ldTimer);
+  ldTimer = setTimeout(loadDevices, 400);
+}
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws');
+  ws.onopen = () => setPill('wss', true);
+  ws.onclose = () => { setPill('wss', false); setTimeout(connectWS, 3000); };
+  ws.onmessage = (ev) => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.type === 'device_update') {
+      if (m.device === selId && view === 'detail') {
+        const d = m.data;
+        if (cur) {
+          cur.online = d.online; cur.lastSyncAt = d.lastSyncAt; cur.state = d.state;
+          cur.battery = d.battery; cur.fw = d.fw; cur.sensorHealth = d.sensorHealth;
+          cur.lastEvent = d.lastEvent; cur.snapshot = d.snapshot;
+        }
+        // 顶部状态栏（同步时间/离线/实时模式）在所有 tab 下实时更新；开发者模式样式一并保留
+        const st = $('.sync-tag');
+        if (st) st.innerHTML = cur && cur.devmode ? '<span class="dot live"></span>实时（开发者模式）' : (d.online ? '最后同步 ' + fmtTime(d.lastSyncAt) : '<span class="dot"></span>离线');
+        // 按当前 tab 局部刷新：只读 tab 更新内容；可编辑 tab（参数/语音/WiFi/OTA/自检）不重建页面，
+        // 避免设备心跳把用户正在填写的表单清空并踢回概览页（输入完整保留）
+        const t = curTab();
+        if (t === 'overview') refreshOverview();
+        else if (t === 'live') refreshLive();
+        else if (t === 'events') refreshEvents();
+        // 其余 tab 不重建：数据已更新到 cur，表单输入保留
+      }
+      loadDevicesDebounced();
+    }
+    if (m.type === 'devices_sync') loadDevicesDebounced();
+    if (m.type === 'live' && m.device === selId && cur && cur.devmode && view === 'detail') {
+      cur.snapshot = m.data;
+      refreshLive();
+    }
+    if (m.type === 'diag' && m.device === selId && view === 'detail') {
+      onDiagResult(m.data);
+    }
+    if (m.type === 'diag_ai' && m.device === selId && view === 'detail') {
+      if (cur.lastDiag) cur.lastDiag.aiSummary = m.data.summary;
+      refreshDiag();
+    }
+    if (m.type === 'event' && m.device === selId && view === 'detail') {
+      if (!window.__eventsCache) window.__eventsCache = {};
+      if (!window.__eventsCache[selId]) window.__eventsCache[selId] = [];
+      window.__eventsCache[selId].push(m.data);
+      window.__eventsCache[selId] = window.__eventsCache[selId].slice(-30);
+      refreshEvents();
+    }
+    if (m.type === 'devmode' && m.device === selId && view === 'detail') {
+      if (!m.data.on) { devmodeEnd = 0; loadDevices(); }
+    }
+    if (m.type === 'settings_update' && view === 'ai') {
+      settingsCache = null;
+    }
+  };
+}
+function setPill(id, ok) { $('#' + id + '-dot').className = 'dot ' + (ok ? 'ok' : ''); $('#' + id).className = 'pill ' + (ok ? 'ok' : ''); }
+
+function refreshOverview() {
+  const tb = $('#tab-body');
+  if (!tb) return;
+  const t = curTab();
+  if (t !== 'overview' && t !== null) return;
+  // 概览实际展示的字段无变化时跳过重绘（开发者模式高频推送下不抖动、省开销）
+  const k = JSON.stringify([
+    cur.online, cur.state, cur.battery, cur.fw, cur.lastSyncAt, cur.devmode,
+    cur.sensorHealth, cur.snapshot, cur.lastEvent, cur.lastDiag
+  ]);
+  if (k === refreshOverview.__last) return;
+  refreshOverview.__last = k;
+  tb.innerHTML = tabBody('overview');
+}
+function refreshLive() { const tb = $('#tab-body'); if (tb && curTab() === 'live') tb.innerHTML = tabBody('live'); }
+function refreshDiag() {
+  const tb = $('#tab-body');
+  if (tb && curTab() === 'diag') {
+    if (diagAnimating) return;
+    tb.innerHTML = tabBody('diag'); bindTabActions('diag');
+  }
+}
+function refreshEvents() { const tb = $('#tab-body'); if (tb && curTab() === 'events') tb.innerHTML = tabBody('events'); }
+function curTab() { const t = document.querySelector('.tab.on'); return t ? t.dataset.tab : null; }
+
+/* ================= 启动 ================= */
+async function boot() {
+  // 并行发起：健康检查 / 设备列表 / 固件库 / 事件预热，互不阻塞，首屏更快
+  const [h] = await Promise.all([
+    api('/api/health').catch(() => null),
+    loadDevices(),            // 内部会渲染首页（view === 'devices'）
+    loadFirmwares(),
+    api('/api/events?limit=200').catch(() => ({ events: [] })).then((evs) => {
+      window.__eventsCache = {};
+      (evs.events || []).forEach((e) => { if (!window.__eventsCache[e.device]) window.__eventsCache[e.device] = []; window.__eventsCache[e.device].push(e); });
+    })
+  ]);
+  if (h) { setPill('srv', true); setPill('mqt', !!h.mqtt); }
+  else setPill('srv', false);
+  connectWS();
+}
+boot();
+setInterval(loadDevices, 15000);
+</script>
+</body>
+</html>
