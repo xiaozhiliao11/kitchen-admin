@@ -36,6 +36,7 @@
 #include <esp_random.h>
 #include <Update.h>
 #include <HTTPClient.h>
+#include <WebServer.h>
 
 /* ---------------- 配置区 ---------------- */
 /* Wi-Fi：留空 = 只用 NVS 里「首次配网」保存的凭据（推荐）。
@@ -71,6 +72,14 @@ const unsigned long WDT_TIMEOUT_SEC = 30;              // 看门狗超时
 const char* MQTT_USER = "";
 const char* MQTT_PASS = "";
 
+/* ---------------- 配网模式（首次激活 / 按键重新配网） ---------------- */
+/* 体验：设备在身边 → 开热点 XZL-<ID> → 手机连热点 → 打开 192.168.4.1
+ * → 配网页显示附近 WiFi 列表（设备扫描）→ 点选自家网络输密码 → 保存并连网。 */
+const char* AP_SSID_PREFIX           = "XZL-";              // 热点名前缀
+const unsigned long PROVISION_TIMEOUT_MS = 10UL * 60 * 1000; // 无操作自动关热点
+const int    PROVISION_BUTTON_PIN    = 19;                  // 长按 3s 重新配网（按下=LOW）
+const unsigned long PROVISION_BUTTON_HOLD_MS = 3000UL;
+
 /* ---------------- 全局 ---------------- */
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
@@ -82,6 +91,13 @@ WifiState wifiState = WIFI_IDLE;
 unsigned long wifiMark = 0;
 unsigned long wifiBackoffMs = 5000;
 int wifiRetryCount = 0;
+
+/* 配网模式状态 */
+WebServer provServer(80);          // 配网 WebServer（仅配网模式生效）
+bool provisioning = false;
+unsigned long provisionUntil = 0;
+unsigned long btnDownSince = 0;    // 按键长按计时（非阻塞）
+bool btnWasDown = false;
 
 bool devmode = false;
 unsigned long devmodeUntil = 0;
@@ -647,6 +663,172 @@ void wdtInit() {
   esp_task_wdt_add(NULL);
 }
 
+/* ---------------- 配网模式：设备开热点，手机连热点后打开 192.168.4.1 ---------------- */
+String apSsidName() {
+  String n = String(AP_SSID_PREFIX) + String(DEVICE_ID);
+  if (n.length() > 24) n = n.substring(0, 24);   // 热点名上限，避免超长
+  return n;
+}
+
+void startProvisioning() {
+  if (provisioning) return;
+  provisioning = true;
+  provisionUntil = millis() + PROVISION_TIMEOUT_MS;
+  String ap = apSsidName();
+  WiFi.mode(WIFI_AP_STA);                 // AP 供手机连；STA 用于扫描附近网络
+  WiFi.softAP(ap.c_str());                // 无密码热点 + 10 分钟限时，配网场景可接受
+  delay(200);
+  Serial.printf("[PROV] 配网模式开启：热点 %s，配网页 http://192.168.4.1（%lu 秒后自动关闭）\n",
+                ap.c_str(), PROVISION_TIMEOUT_MS / 1000);
+  localEvent("wifi", "info", ("进入配网模式: " + ap).c_str());
+}
+
+void stopProvisioning() {
+  if (!provisioning) return;
+  provisioning = false;
+  provisionUntil = 0;
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_STA);
+  Serial.println("[PROV] 配网模式已关闭");
+}
+
+/* 配网页（内嵌单文件）：附近 WiFi 列表由 JS fetch /api/scan 渲染，点选自动填入 */
+const char PROV_PAGE[] PROGMEM = R"PROVHTML(
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>小知了 · 配网</title>
+<style>
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f5f7fa;margin:0;padding:16px;color:#1f2937}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+h1{font-size:18px;margin:0 0 4px}h2{font-size:15px;margin:0 0 8px}.muted{color:#6b7280;font-size:13px}
+input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:16px;margin:4px 0}
+button{width:100%;padding:12px;border:0;border-radius:8px;background:#0b6e4f;color:#fff;font-size:16px;margin-top:8px}
+button:disabled{background:#9ca3af}
+.net{display:flex;justify-content:space-between;align-items:center;padding:10px 8px;border-bottom:1px solid #f3f4f6;cursor:pointer;font-size:15px}
+.net:active{background:#f3f4f6}.bars{display:inline-flex;align-items:flex-end;gap:1px;margin-left:6px}
+.bar{width:3px;background:#10b981;border-radius:1px}
+#st{font-size:13px;margin-top:8px}
+</style></head><body>
+<div class="card"><h1>小知了厨房卫士 · 配网</h1>
+<p class="muted">已扫描附近 WiFi，点选你家网络并输入密码；也可以手动输入名称。</p></div>
+<div class="card"><h2>附近网络 <span id="scanning" class="muted"></span></h2>
+<div id="nets"><p class="muted">正在扫描，请稍候…</p></div></div>
+<div class="card"><h2>连接设置</h2>
+<p class="muted">WiFi 名称（SSID）</p><input id="ssid" placeholder="点选上方网络自动填入">
+<p class="muted">密码</p><input id="pass" type="password" placeholder="开放网络可留空">
+<button id="btn">连接 WiFi</button><div id="st"></div></div>
+<script>
+function barHtml(rssi){var n=Math.max(1,Math.min(4,Math.round((rssi+100)/20)));var s="";for(var i=0;i<4;i++){s+='<span class="bar" style="height:'+(5+i*3)+'px;opacity:'+(i<n?1:.25)+'"></span>';}return s;}
+fetch('/api/scan').then(function(r){return r.json()}).then(function(j){
+  var box=document.getElementById('nets');box.innerHTML='';
+  if(!j.networks||!j.networks.length){box.innerHTML='<p class="muted">未扫描到网络，请把设备放近路由器后刷新重试。</p>';return;}
+  j.networks.forEach(function(n){
+    var d=document.createElement('div');d.className='net';
+    d.innerHTML='<span>'+(n.ssid||'&lt;隐藏网络&gt;')+(n.auth>0?' <span class="muted">加密</span>':'')+'</span><span class="bars">'+barHtml(n.rssi)+'</span>';
+    d.onclick=function(){document.getElementById('ssid').value=n.ssid||'';document.getElementById('pass').focus();};
+    box.appendChild(d);
+  });
+  document.getElementById('scanning').textContent='（共 '+j.networks.length+' 个）';
+}).catch(function(){document.getElementById('nets').innerHTML='<p class="muted">扫描失败，请刷新重试。</p>';});
+document.getElementById('btn').onclick=function(){
+  var ssid=document.getElementById('ssid').value.trim(),pass=document.getElementById('pass').value;
+  if(!ssid){alert('请选择或输入 WiFi 名称');return;}
+  var b=document.getElementById('btn');b.disabled=true;b.textContent='连接中…';
+  fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:ssid,pass:pass})})
+  .then(function(r){return r.json()}).then(function(j){
+    var st=document.getElementById('st');
+    if(j.ok){st.innerHTML='<b style="color:#0b6e4f">已保存：'+j.ssid+'。设备正在连接路由器，热点将自动关闭。</b>';setTimeout(function(){location.reload()},3000);}
+    else{st.innerHTML='<b style="color:#dc2626">失败：'+(j.error||'未知错误')+'</b>';b.disabled=false;b.textContent='连接 WiFi';}
+  }).catch(function(){document.getElementById('st').innerHTML='<b style="color:#dc2626">请求失败，请重试</b>';b.disabled=false;b.textContent='连接 WiFi';});
+};
+</script></body></html>
+)PROVHTML";
+
+void provHandleRoot() {
+  provServer.send_P(200, "text/html; charset=utf-8", PROV_PAGE);
+}
+
+void provHandleScan() {
+  /* 扫描附近 WiFi（AP+STA 模式；scanNetworks 阻塞 1~3s，配网低频场景可接受） */
+  int n = WiFi.scanNetworks();
+  StaticJsonDocument<4096> doc;
+  JsonArray arr = doc.createNestedArray("networks");
+  for (int i = 0; i < n && i < 20; i++) {
+    JsonObject o = arr.createNestedObject();
+    o["ssid"] = WiFi.SSID(i);
+    o["rssi"] = WiFi.RSSI(i);
+    o["auth"] = WiFi.encryptionType(i);
+  }
+  WiFi.scanDelete();
+  char out[4096];
+  serializeJson(doc, out, sizeof(out));
+  provServer.send(200, "application/json", out);
+}
+
+void provHandleConnect() {
+  StaticJsonDocument<512> in;
+  if (provServer.hasArg("plain") && deserializeJson(in, provServer.arg("plain").c_str()) == DeserializationError::Ok) {
+    const char* ssid = in["ssid"] | "";
+    const char* pass = in["pass"] | "";
+    if (strlen(ssid) == 0) {
+      provServer.send(400, "application/json", "{\"ok\":false,\"error\":\"缺少 SSID\"}");
+      return;
+    }
+    if (strlen(ssid) > 32 || strlen(pass) > 64) {
+      provServer.send(400, "application/json", "{\"ok\":false,\"error\":\"SSID≤32 位，密码≤64 位\"}");
+      return;
+    }
+    prefs.putString("wifi_ssid", ssid);
+    prefs.putString("wifi_pass", pass);
+    Serial.printf("[PROV] 收到配网：%s，保存并重连\n", ssid);
+    stopProvisioning();                  // 关热点，转 STA
+    wifiState = WIFI_IDLE;               // 状态机立即用新凭据连接
+    wifiRetryCount = 0;
+    wifiBackoffMs = 5000;
+    StaticJsonDocument<128> ok;
+    ok["ok"] = true;
+    ok["ssid"] = ssid;
+    char out[160];
+    serializeJson(ok, out, sizeof(out));
+    provServer.send(200, "application/json", out);
+  } else {
+    provServer.send(400, "application/json", "{\"ok\":false,\"error\":\"需要 JSON 请求体\"}");
+  }
+}
+
+void provHandleStatus() {
+  StaticJsonDocument<256> d;
+  d["provisioning"] = provisioning;
+  d["ssid"] = prefs.getString("wifi_ssid", "");
+  d["ap"] = apSsidName();
+  d["ip"] = WiFi.softAPIP().toString();
+  char out[300];
+  serializeJson(d, out, sizeof(out));
+  provServer.send(200, "application/json", out);
+}
+
+void setupProvisioningServer() {
+  provServer.on("/", HTTP_GET, provHandleRoot);
+  provServer.on("/api/scan", HTTP_GET, provHandleScan);
+  provServer.on("/api/connect", HTTP_POST, provHandleConnect);
+  provServer.on("/api/status", HTTP_GET, provHandleStatus);
+  provServer.begin();
+  Serial.println("[PROV] 配网服务器已就绪（http://192.168.4.1）");
+}
+
+/* 按键长按 3s → 重新进入配网（换网络/改密码场景）。非阻塞，不占主循环 */
+void pollProvisionButton() {
+  bool down = digitalRead(PROVISION_BUTTON_PIN) == LOW;
+  if (down && !btnWasDown) { btnDownSince = millis(); btnWasDown = true; }
+  else if (!down && btnWasDown) { btnWasDown = false; btnDownSince = 0; }
+  else if (down && btnWasDown && (millis() - btnDownSince >= PROVISION_BUTTON_HOLD_MS)) {
+    btnWasDown = false;
+    btnDownSince = 0;
+    Serial.println("[PROV] 按键长按触发：进入配网模式");
+    startProvisioning();
+  }
+}
+
 /* Wi-Fi 状态机：全部非阻塞，主循环任何时刻都不等待网络 */
 void wifiTick() {
   unsigned long now = millis();
@@ -655,7 +837,8 @@ void wifiTick() {
       String ssid = prefs.getString("wifi_ssid", "");
       String pass = prefs.getString("wifi_pass", "");
       if (ssid.length() == 0) { ssid = String(WIFI_SSID); pass = String(WIFI_PASS); }
-      if (ssid.length() == 0) {              // 从未配网：保持离线，等待首次激活配网
+      if (ssid.length() == 0) {              // 从未配网：进入配网模式（热点 + 配网页）
+        startProvisioning();
         wifiState = WIFI_BACKOFF; wifiMark = now; wifiBackoffMs = 60000;
         break;
       }
@@ -1060,6 +1243,14 @@ void setup() {
   WiFi.mode(WIFI_STA);
   wifiState = WIFI_IDLE;
 
+  /* 5b. 配网服务器常驻：按键长按 3s 可随时重新配网；首次无 WiFi 凭据直接进配网模式 */
+  pinMode(PROVISION_BUTTON_PIN, INPUT_PULLUP);
+  setupProvisioningServer();
+  if (prefs.getString("wifi_ssid", "").length() == 0) {
+    Serial.println("[PROV] 未找到已保存的 WiFi：首次激活，进入配网模式（热点 XZL-…，配网页 192.168.4.1）");
+    startProvisioning();
+  }
+
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
   mqtt.setBufferSize(MQTT_MAX_PACKET_SIZE);   // 与宏双保险，防大报文被截断
@@ -1071,6 +1262,12 @@ void loop() {
   esp_task_wdt_reset();     // 喂狗：能跑到这里说明主循环还活着
 
   pollSerialDbg();          // 有线调试：处理 USB 串口指令
+  provServer.handleClient();// 配网页（热点模式；按键触发后同样可用）
+  pollProvisionButton();    // 按键长按 3s → 重新进入配网
+  if (provisioning && millis() >= provisionUntil) {
+    Serial.println("[PROV] 配网超时，已关闭热点（再次长按按键可重新进入）");
+    stopProvisioning();
+  }
   wifiTick();               // 非阻塞 Wi-Fi 状态机
 
   if (!mqtt.connected()) connectMqtt();
