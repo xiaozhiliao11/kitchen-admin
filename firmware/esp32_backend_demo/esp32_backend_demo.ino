@@ -1156,7 +1156,7 @@ void onCmd(const String& payload) {
     // 后台「设备页 WiFi 配置」下发：保存 SSID/密码，交给状态机异步重连（不再阻塞 20s）
     const char* ssid = doc["ssid"] | "";
     const char* pass = doc["pass"] | "";
-    if (strlen(ssid) > 0) {
+    if (strlen(ssid) > 0 && strlen(ssid) <= 32 && strlen(pass) <= 64) {   // 与配网页同规则钳制
       prefs.putString("wifi_ssid", ssid);
       prefs.putString("wifi_pass", pass);
       Serial.printf("[CMD] WiFi 配置已保存：%s（非阻塞重连）\n", ssid);
@@ -1164,6 +1164,9 @@ void onCmd(const String& payload) {
       wifiState = WIFI_IDLE;
       wifiRetryCount = 0;
       wifiBackoffMs = 5000;
+    } else {
+      publishAck(cmd, false, "SSID≤32 位，密码≤64 位", nonce);
+      return;
     }
   } else {
     publishAck(cmd, false, "未知指令", nonce);
