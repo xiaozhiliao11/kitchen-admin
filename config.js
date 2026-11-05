@@ -7,6 +7,7 @@
  *   MQTT_URL              MQTT Broker 地址（默认公共测试 Broker broker.emqx.io:1883）
  *   MQTT_USER / MQTT_PASS Broker 账号密码（私有 Broker 必填）
  *   MQTT_TOPIC_PREFIX     设备 topic 前缀（默认 dev/，部署私有 Broker 时建议改成自己前缀）
+ *   CMD_SECRET            指令签名密钥（HMAC-SHA256，须与固件一致；为空=兼容放行）
  *   OFFLINE_AFTER_MS      心跳超时判离线毫秒数（默认 90000 = 90 秒）
  *   DEVMODE_TTL_SEC       开发者模式默认超时秒数（默认 1800 = 30 分钟）
  *   AI_API_KEY / AI_ENDPOINT / AI_MODEL   可选：大模型 API 增强故障分析
@@ -20,6 +21,9 @@ module.exports = {
     password: process.env.MQTT_PASS || '',
     topicPrefix: process.env.MQTT_TOPIC_PREFIX || 'dev/',
     clientId: process.env.MQTT_CLIENT_ID || ('kitchen-admin-' + Math.random().toString(36).slice(2, 8)),
+    // 指令签名密钥（HMAC-SHA256）。必须与固件 CMD_SECRET 一致：
+    // 为空 = 兼容放行（不签名也不验签）；配置后固件拒绝未签名/重放指令
+    cmdSecret: process.env.CMD_SECRET || '',
     // 设备离线由后端心跳超时判定；如需遗嘱消息，可在此发布 dev/{id}/lwt
     will: null
   },

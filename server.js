@@ -71,10 +71,22 @@ function parseTopic(topic) {
   return { device: rest.slice(0, idx), kind: rest.slice(idx + 1) };
 }
 
+/** 指令签名：HMAC-SHA256(id|ts|nonce|cmd)，与固件 verifyCmdSig 同规则。
+ * 未配置 CMD_SECRET 时不签名（固件侧同为兼容放行），配置后强制签。 */
+function signCmd(device, payload) {
+  const secret = config.mqtt.cmdSecret;
+  if (!secret) return payload;
+  const ts = Math.floor(Date.now() / 1000);
+  const nonce = crypto.randomBytes(6).toString('hex');
+  const data = `${device}|${ts}|${nonce}|${payload.cmd || ''}`;
+  const sig = crypto.createHmac('sha256', secret).update(data).digest('hex');
+  return { ...payload, sig, ts, nonce };
+}
+
 function publishCmd(device, payload) {
   const dev = store.getDevice(device);
   const online = mqttClient && mqttClient.connected && dev && !!dev.online;
-  mqttClient.publish(PREFIX + device + '/cmd', JSON.stringify(payload), { qos: 1 });
+  mqttClient.publish(PREFIX + device + '/cmd', JSON.stringify(signCmd(device, payload)), { qos: 1 });
   return !!online;
 }
 
@@ -102,6 +114,15 @@ seedInitialDevices();
 /** MQTT 上报是否来自已注册设备（未注册 → 忽略，保持"删除即移除"语义） */
 function isKnownDevice(id) {
   return !!store.getDevice(id);
+}
+
+/** 指令执行回执：dev/{id}/ack —— 让后台确认「发下去的指令执行了没有」 */
+function handleAck(device, msg) {
+  const cmd = msg.cmd || '?';
+  const ok = !!msg.ok;
+  store.upsertDevice({ id: device, lastAck: { cmd, ok, detail: msg.detail || '', ts: msg.ts || null, tsConf: msg.tsConf || 'unset', at: Date.now() } });
+  store.addEvent({ device, type: 'ack', level: ok ? 'info' : 'warn', text: `指令回执 ${cmd} ${ok ? '成功' : '失败'}${msg.detail ? '：' + msg.detail : ''}`, ts: Date.now() });
+  console.log(`[ACK] ${device} ${cmd} ok=${ok}${msg.detail ? ' ' + msg.detail : ''}`);
 }
 
 function handleStatus(device, msg) {
@@ -513,9 +534,11 @@ app.post('/api/firmwares/upload', express.raw({ type: '*/*', limit: '8mb' }), (r
   const fileName = `${id}_${name}_v${version}.bin`;
   if (!fs.existsSync(config.firmwareDir)) fs.mkdirSync(config.firmwareDir, { recursive: true });
   fs.writeFileSync(path.join(config.firmwareDir, fileName), req.body);
+  const sha256 = crypto.createHash('sha256').update(req.body).digest('hex');
   const fw = {
     id, name, version, note,
     size: req.body.length,
+    sha256,
     fileName,
     uploadedAt: Date.now()
   };
@@ -582,14 +605,25 @@ app.post('/api/devices/:id/power', deviceParam, (req, res) => {
   res.json({ ok: true, action, text: POWER_ACTIONS[action], warn: offlineWarn(req.deviceId) });
 });
 
-// 远程升级固件 OTA：{ url, version }（url 必须为 http/https，防止向设备下发任意协议地址）
+// 远程升级固件 OTA：{ url, version, sha256? } 或 { firmwareId }
+// 真 OTA 必须带 64 位 SHA256，否则固件会拒绝（与固件 otaFromUrl 一致）
 app.post('/api/devices/:id/ota', deviceParam, (req, res) => {
-  const { url, version } = req.body || {};
+  const body = req.body || {};
+  let { url, version, sha256 } = body;
+  if (body.firmwareId) {
+    const fw = store.getFirmware(body.firmwareId);
+    if (fw) {
+      if (!version) version = fw.version;
+      sha256 = fw.sha256 || sha256;
+    }
+  }
   if (!url || !version) return res.status(400).json({ error: '缺少 url 或 version' });
   if (!/^https?:\/\/.+/i.test(String(url))) return res.status(400).json({ error: '固件下载地址必须是 http:// 或 https:// 开头' });
-  publishCmd(req.deviceId, { cmd: 'ota', url: String(url), version: String(version).slice(0, 24) });
-  store.addEvent({ device: req.deviceId, type: 'ota', level: 'info', text: `下发 OTA：v${String(version).slice(0, 24)}`, ts: Date.now() });
-  res.json({ ok: true, url: String(url), version: String(version).slice(0, 24), warn: offlineWarn(req.deviceId) });
+  if (!sha256 || !/^[0-9a-f]{64}$/i.test(String(sha256))) return res.status(400).json({ error: '缺少有效 sha256（64 位十六进制），真 OTA 必须校验固件摘要' });
+  const finalSha = String(sha256).toLowerCase();
+  publishCmd(req.deviceId, { cmd: 'ota', url: String(url), version: String(version).slice(0, 24), sha256: finalSha });
+  store.addEvent({ device: req.deviceId, type: 'ota', level: 'info', text: `下发 OTA：v${String(version).slice(0, 24)}（sha256=${finalSha.slice(0, 8)}…）`, ts: Date.now() });
+  res.json({ ok: true, url: String(url), version: String(version).slice(0, 24), sha256: finalSha, warn: offlineWarn(req.deviceId) });
 });
 
 // 修改触发参数：{ params: {...} }（数值按范围钳制，未知字段丢弃，防止无效值写入真机）
@@ -726,7 +760,8 @@ mqttClient.on('connect', () => {
   mqttClient.subscribe(PREFIX + '+/event');
   mqttClient.subscribe(PREFIX + '+/diag');
   mqttClient.subscribe(PREFIX + '+/snap');
-  console.log(`[MQTT] 已订阅 ${PREFIX}+/status|event|diag|snap`);
+  mqttClient.subscribe(PREFIX + '+/ack');
+  console.log(`[MQTT] 已订阅 ${PREFIX}+/status|event|diag|snap|ack`);
 });
 
 mqttClient.on('reconnect', () => console.log('[MQTT] 重连中...'));
@@ -747,6 +782,7 @@ mqttClient.on('message', (topic, payload) => {
   else if (parsed.kind === 'event') handleEvent(parsed.device, msg);
   else if (parsed.kind === 'diag') handleDiag(parsed.device, msg);
   else if (parsed.kind === 'snap') handleSnap(parsed.device, msg);
+  else if (parsed.kind === 'ack') handleAck(parsed.device, msg);
 });
 
 server.listen(config.httpPort, () => {

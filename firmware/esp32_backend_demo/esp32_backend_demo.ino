@@ -20,27 +20,54 @@
  *
  * 使用前修改下面的 WIFI_SSID / WIFI_PASS / MQTT_HOST / DEVICE_ID。
  */
+/* 单包上限必须放大：PubSubClient 默认 256 字节，而 status 报文（含 4 条语音话术）
+ * 约 400~600 字节，超限会静默发布失败 —— 表现为「设备在线但后台永远收不到心跳」。
+ * 必须在 #include <PubSubClient.h> 之前定义才生效。 */
+#define MQTT_MAX_PACKET_SIZE 2048
+
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <esp_task_wdt.h>
+#include <mbedtls/md.h>
+#include <mbedtls/sha256.h>
+#include <time.h>
+#include <esp_random.h>
+#include <Update.h>
+#include <HTTPClient.h>
 
 /* ---------------- 配置区 ---------------- */
-const char* WIFI_SSID     = "你的WiFi";
-const char* WIFI_PASS     = "你的密码";
+/* Wi-Fi：留空 = 只用 NVS 里「首次配网」保存的凭据（推荐）。
+ * 若填写则作为出厂兜底：NVS 无凭据时才使用。 */
+const char* WIFI_SSID     = "";
+const char* WIFI_PASS     = "";
 const char* MQTT_HOST     = "broker.emqx.io";   // 部署私有 Broker 后改这里
 const int   MQTT_PORT     = 1883;
-const char* DEVICE_ID     = "A001";             // 每台主机唯一 ID（后台据此识别）
+/* 设备身份：留空 = 由芯片 MAC 自动派生唯一 ID（量产推荐，免逐台改代码）。
+ * 需要固定为后台白名单里的 A001 时，填 "A001"。 */
+const char* DEVICE_ID_OVERRIDE = "";
 const char* TOPIC_PREFIX  = "dev/";             // 与后台 config 一致
+char DEVICE_ID[24] = "XZL-000000";              // 运行时生成，全文件统一引用
+
+/* 指令签名密钥（HMAC-SHA256）。留空 = 不校验（兼容未升级的后台）。
+ * 一旦填入（与后台 CMD_SECRET 一致），所有下行指令必须带合法 sig/ts/nonce，否则丢弃。
+ * 注意：HMAC 防「凭空伪造」与「重放」，但明文 MQTT 可被嗅探，
+ *      要防嗅探篡改必须换 TLS(8883) 或私有 Broker —— 见安全说明。 */
+const char* CMD_SECRET_DEFAULT = "";
+char cmdSecret[65] = "";
+long long lastCmdTs = 0;                        // 防重放：记录已接受的最大时间戳
+const long long CMD_TS_TOLERANCE = 300;         // 允许 5 分钟时钟偏差
 
 /* ---------------- 心跳策略 ---------------- */
 const unsigned long NORMAL_INTERVAL_MS = 60UL * 1000;   // 常态低频心跳 60s
 const unsigned long DEVMODE_INTERVAL_MS = 5UL * 1000;   // 开发者模式高频 5s
 
-/* ---------------- 网络自愈参数（跨网/断网/弱信号场景） ---------------- */
-const unsigned long WIFI_CONNECT_TIMEOUT_MS = 30000;   // WiFi 连接超时 30s：连不上也进入主循环，不永久阻塞
-const unsigned long NET_RETRY_MS = 5000;               // WiFi/MQTT 重试节流 5s：非阻塞，串口调试/检测逻辑不中断
-// 私有/受控 Broker 可选账密（默认空 = 公共 Broker 免密，保持现有行为不变）
+/* ---------------- 网络自愈参数 ---------------- */
+const unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;   // 单次尝试超时（非阻塞状态机推进）
+const unsigned long NET_RETRY_MS = 5000;               // MQTT 重试节流
+const unsigned long WDT_TIMEOUT_SEC = 30;              // 看门狗超时
+// 私有/受控 Broker 可选账密（默认空 = 公共 Broker 免密）
 const char* MQTT_USER = "";
 const char* MQTT_PASS = "";
 
@@ -49,12 +76,26 @@ WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
 Preferences prefs;
 
+/* Wi-Fi 非阻塞状态机：主循环绝不等待，报警路径不受网络影响 */
+enum WifiState { WIFI_IDLE, WIFI_CONNECTING, WIFI_UP, WIFI_BACKOFF };
+WifiState wifiState = WIFI_IDLE;
+unsigned long wifiMark = 0;
+unsigned long wifiBackoffMs = 5000;
+int wifiRetryCount = 0;
+
 bool devmode = false;
 unsigned long devmodeUntil = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long bootTs = 0;
 bool poweredOff = false; // 软件关机（保留 MQTT 监听，可远程开机）
 String fwVersion = "1.2.0";
+
+/* 时间基准：C3 无 RTC 备份，断电归零。
+ * 联网时用 SNTP 校时并记录锚点；离线期间用 millis 差推算；
+ * 从未校时过则 timeReady=false，事件时间戳标记为不可信，绝不伪造时间。 */
+bool timeReady = false;
+long long epochBase = 0;
+unsigned long millisBase = 0;
 
 // 触发参数（后台可远程下发，存 NVS 持久化）
 struct Params {
@@ -311,7 +352,7 @@ void dbgSetReply(const String& key, const String& jsonArg) {
   doc["ok"] = false;
   doc["key"] = key;
   DynamicJsonDocument val(900);
-  if (deserializeJson(val, jsonArg)) {
+  if (deserializeJson(val, jsonArg.c_str())) {
     doc["error"] = "参数 JSON 解析失败";
   } else if (key == "volume") {
     int vol = (int)val["volume"] | (int)val.as<int>();
@@ -439,12 +480,10 @@ void handleDbg(const String& line) {
       prefs.putString("wifi_ssid", ssid);
       prefs.putString("wifi_pass", pass);
       WiFi.disconnect();
-      WiFi.begin(ssid.c_str(), pass.c_str());
-      unsigned long t0 = millis();
-      while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) delay(500);
+      wifiState = WIFI_IDLE; wifiRetryCount = 0; wifiBackoffMs = 5000;
       StaticJsonDocument<256> d;
       d["dbg"] = "wifi"; d["ok"] = true; d["ssid"] = ssid;
-      d["connected"] = WiFi.status() == WL_CONNECTED;
+      d["connected"] = false; d["state"] = "connecting";
       char b[300]; serializeJson(d, b); Serial.println(b);
       Serial.println(WiFi.status() == WL_CONNECTED ? "[DBG] WiFi 重连成功" : "[DBG] WiFi 重连失败（保持离线等待重试）");
     } else {
@@ -459,6 +498,13 @@ void handleDbg(const String& line) {
     String v = sp2 < 0 ? "{}" : arg.substring(sp2 + 1);
     k.trim();
     dbgSetReply(k, v);
+  } else if (cmd == "secret") {
+    /* DBG:secret <key> —— 设置指令签名密钥（空参数=关闭验签，仅调试用） */
+    arg.toCharArray(cmdSecret, sizeof(cmdSecret));
+    prefs.putString("cmd_secret", String(cmdSecret));
+    StaticJsonDocument<200> d;
+    d["dbg"] = "secret"; d["ok"] = true; d["enabled"] = strlen(cmdSecret) > 0;
+    char b[220]; serializeJson(d, b); Serial.println(b);
   } else if (cmd == "reset") {
     StaticJsonDocument<160> d; d["dbg"] = "reset"; d["ok"] = true; d["action"] = "restart";
     char b[200]; serializeJson(d, b); Serial.println(b);
@@ -492,6 +538,162 @@ String topic(const char* kind) {
   return String(TOPIC_PREFIX) + DEVICE_ID + "/" + kind;
 }
 
+/* 设备唯一 ID：优先 NVS 已存 → 手工覆盖 → 芯片 MAC 派生。
+ * 目的：量产不必逐台改代码编译；两台重名会导致后台数据互相覆盖。 */
+void initDeviceId() {
+  String saved = prefs.getString("dev_id", "");
+  if (saved.length() > 0) { saved.toCharArray(DEVICE_ID, sizeof(DEVICE_ID)); return; }
+  if (strlen(DEVICE_ID_OVERRIDE) > 0) {
+    strncpy(DEVICE_ID, DEVICE_ID_OVERRIDE, sizeof(DEVICE_ID) - 1);
+  } else {
+    uint64_t mac = ESP.getEfuseMac();
+    snprintf(DEVICE_ID, sizeof(DEVICE_ID), "XZL-%06lX", (unsigned long)(mac & 0xFFFFFF));
+  }
+  prefs.putString("dev_id", DEVICE_ID);
+  Serial.printf("[ID] 设备唯一 ID = %s\n", DEVICE_ID);
+}
+
+/* 当前真实时间（epoch 秒）。未校时过则返回 0 表示不可信，绝不编造。 */
+unsigned long nowEpoch() {
+  if (timeReady) return (unsigned long)(epochBase + (long long)((millis() - millisBase) / 1000));
+  return (unsigned long)prefs.getLong64("t_last", 0);
+}
+
+/* SNTP 校时成功后记录「时间 + uptime」锚点，离线期间用差值推算 */
+void syncTimeAnchor() {
+  time_t t = time(nullptr);
+  if (t < 1600000000) return;               // 尚未同步成功（早于 2020 视为无效）
+  epochBase = (long long)t;
+  millisBase = millis();
+  timeReady = true;
+  prefs.putLong64("t_last", (long long)t);  // 仅供重启后粗略参考
+  Serial.printf("[TIME] 已校时 epoch=%ld\n", (long)t);
+}
+
+/* HMAC-SHA256 → 64 位小写十六进制 */
+bool hmacHex(const char* key, const String& data, String& out) {
+  unsigned char h[32];
+  mbedtls_md_context_t ctx;
+  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (!info) return false;
+  mbedtls_md_init(&ctx);
+  if (mbedtls_md_setup(&ctx, info, 1) != 0) { mbedtls_md_free(&ctx); return false; }
+  mbedtls_md_hmac_starts(&ctx, (const unsigned char*)key, strlen(key));
+  mbedtls_md_hmac_update(&ctx, (const unsigned char*)data.c_str(), data.length());
+  mbedtls_md_hmac_finish(&ctx, h);
+  mbedtls_md_free(&ctx);
+  out = String();
+  for (int i = 0; i < 32; i++) { char b[3]; snprintf(b, sizeof(b), "%02x", h[i]); out += b; }
+  return true;
+}
+
+/* 定长比较，避免逐字符提前返回带来的时序侧信道 */
+bool constantTimeEq(const String& a, const String& b) {
+  if (a.length() != b.length()) return false;
+  unsigned char diff = 0;
+  for (unsigned i = 0; i < a.length(); i++) diff |= (unsigned char)(a[i] ^ b[i]);
+  return diff == 0;
+}
+
+/* 下行指令验签。签名串 = id|ts|nonce|cmd（后台按同规则计算）。
+ * 未配置密钥时放行（兼容模式）；配置后强制校验，失败即丢弃并记安全事件。 */
+bool verifyCmdSig(JsonObject doc, const char* cmd, String& why) {
+  if (strlen(cmdSecret) == 0) return true;
+  const char* sig   = doc["sig"]   | "";
+  const char* nonce = doc["nonce"] | "";
+  unsigned long ts  = (unsigned long)(doc["ts"] | 0.0);   // 用 double 解析，避免 int64 依赖
+  if (!sig[0] || !nonce[0] || ts == 0) { why = "缺少 sig/ts/nonce"; return false; }
+  unsigned long now = nowEpoch();
+  if (now > 1600000000UL) {
+    unsigned long d = (now > ts) ? (now - ts) : (ts - now);
+    if (d > (unsigned long)CMD_TS_TOLERANCE) { why = "时间戳超出允许偏差（疑似重放）"; return false; }
+  }
+  if (ts < lastCmdTs) { why = "时间戳早于已接受指令（重放）"; return false; }
+  String data = String(DEVICE_ID) + "|" + String(ts) + "|" + String(nonce) + "|" + String(cmd);
+  String expect;
+  if (!hmacHex(cmdSecret, data, expect)) { why = "HMAC 计算失败"; return false; }
+  if (!constantTimeEq(expect, String(sig))) { why = "签名不匹配"; return false; }
+  lastCmdTs = ts;
+  return true;
+}
+
+/* 指令执行回执：让后台知道「发下去的指令到底执行了没有」 */
+void publishAck(const char* cmd, bool ok, const char* detail, const char* nonce) {
+  StaticJsonDocument<360> doc;
+  doc["id"]     = DEVICE_ID;
+  doc["ts"]     = nowEpoch();
+  doc["tsConf"] = timeReady ? "synced" : "unset";
+  doc["cmd"]    = cmd;
+  doc["ok"]     = ok;
+  doc["detail"] = detail;
+  if (nonce && nonce[0]) doc["nonce"] = nonce;
+  char buf[380];
+  serializeJson(doc, buf);
+  mqtt.publish(topic("ack").c_str(), buf);
+  Serial.printf("[ACK] %s ok=%d %s\n", cmd, ok, detail);
+}
+
+/* 看门狗：单核设备死循环后会「不报警也不报错」，必须能自恢复 */
+void wdtInit() {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  esp_task_wdt_config_t cfg;
+  cfg.timeout_ms     = WDT_TIMEOUT_SEC * 1000;
+  cfg.idle_core_mask = 0;
+  cfg.trigger_panic  = true;
+  if (esp_task_wdt_init(&cfg) != ESP_OK) esp_task_wdt_reconfigure(&cfg);
+#else
+  esp_task_wdt_init(WDT_TIMEOUT_SEC, true);
+#endif
+  esp_task_wdt_add(NULL);
+}
+
+/* Wi-Fi 状态机：全部非阻塞，主循环任何时刻都不等待网络 */
+void wifiTick() {
+  unsigned long now = millis();
+  switch (wifiState) {
+    case WIFI_IDLE: {
+      String ssid = prefs.getString("wifi_ssid", "");
+      String pass = prefs.getString("wifi_pass", "");
+      if (ssid.length() == 0) { ssid = String(WIFI_SSID); pass = String(WIFI_PASS); }
+      if (ssid.length() == 0) {              // 从未配网：保持离线，等待首次激活配网
+        wifiState = WIFI_BACKOFF; wifiMark = now; wifiBackoffMs = 60000;
+        break;
+      }
+      WiFi.mode(WIFI_STA);
+      WiFi.begin(ssid.c_str(), pass.c_str());
+      wifiState = WIFI_CONNECTING; wifiMark = now;
+      Serial.printf("[WIFI] 连接 %s（非阻塞）\n", ssid.c_str());
+      break;
+    }
+    case WIFI_CONNECTING:
+      if (WiFi.status() == WL_CONNECTED) {
+        wifiState = WIFI_UP; wifiRetryCount = 0; wifiBackoffMs = 5000;
+        Serial.printf("[WIFI] 已连接 IP=%s\n", WiFi.localIP().toString().c_str());
+        configTime(8 * 3600, 0, "ntp.aliyun.com", "ntp1.aliyun.com");
+      } else if (now - wifiMark >= WIFI_CONNECT_TIMEOUT_MS) {
+        WiFi.disconnect();
+        wifiRetryCount++;
+        int sh = wifiRetryCount > 4 ? 4 : wifiRetryCount;
+        wifiBackoffMs = 5000UL * (1UL << sh);          // 5/10/20/40/80s
+        if (wifiBackoffMs > 120000UL) wifiBackoffMs = 120000UL;
+        wifiState = WIFI_BACKOFF; wifiMark = now;
+        Serial.printf("[WIFI] 失败，%lus 后重试\n", wifiBackoffMs / 1000);
+      }
+      break;
+    case WIFI_UP:
+      if (WiFi.status() != WL_CONNECTED) {
+        wifiState = WIFI_BACKOFF; wifiMark = now; wifiBackoffMs = 5000;
+        Serial.println("[WIFI] 断开，进入退避重连");
+      } else if (!timeReady) {
+        syncTimeAnchor();
+      }
+      break;
+    case WIFI_BACKOFF:
+      if (now - wifiMark >= wifiBackoffMs) wifiState = WIFI_IDLE;
+      break;
+  }
+}
+
 /* 采集传感器数据（接入主固件时替换为真实读取，此处为占位演示） */
 void collectSensors(JsonObject sensors) {
   sensors["radar"]["presence"] = false;       // LD2410C：UART 读取后替换
@@ -507,7 +709,8 @@ void collectSensors(JsonObject sensors) {
 void publishStatus() {
   StaticJsonDocument<1024> doc;
   doc["id"] = DEVICE_ID;
-  doc["ts"] = millis();
+  doc["ts"] = nowEpoch();
+  doc["tsConf"] = timeReady ? "synced" : "unset";
   doc["state"] = poweredOff ? "off" : "idle";
   doc["battery"] = 97;
   doc["fw"] = fwVersion;
@@ -536,8 +739,9 @@ void publishStatus() {
 void publishDiag() {
   StaticJsonDocument<1024> doc;
   doc["id"] = DEVICE_ID;
-  doc["ts"] = millis();
-  doc["seq"] = random(100000);
+  doc["ts"] = nowEpoch();
+  doc["tsConf"] = timeReady ? "synced" : "unset";
+  doc["seq"] = (unsigned long)esp_random();   // 真随机，避免重启后序号重复
   JsonArray items = doc.createNestedArray("items");
   // 每项：name/status/code/value —— 实际接入时读取真实传感器健康状态
   items.add(serialized("{\"name\":\"radar\",\"status\":\"ok\",\"code\":null,\"value\":\"无人\"}"));
@@ -560,7 +764,8 @@ void publishDiag() {
 void publishEvent(const char* type, const char* level, const char* text) {
   StaticJsonDocument<256> doc;
   doc["id"] = DEVICE_ID;
-  doc["ts"] = millis();
+  doc["ts"] = nowEpoch();
+  doc["tsConf"] = timeReady ? "synced" : "unset";
   doc["type"] = type;
   doc["level"] = level;
   doc["text"] = text;
@@ -570,15 +775,86 @@ void publishEvent(const char* type, const char* level, const char* text) {
   localEvent(type, level, text); // 同步进入有线调试事件缓冲
 }
 
-/* 简化 HTTP OTA：下载固件到备用分区并切换重启
- * 完整版建议用 Update.begin(size)/Write/end 分段写入，加 MD5 校验 */
-bool otaFromUrl(const char* url) {
-  Serial.printf("[OTA] 开始下载 %s\n", url);
-  // 接入主固件时实现 HTTP GET 流式写入 Update；此处仅打印占位
-  // http.begin(wifiClient, url); int code = http.GET(); ... Update.begin(total);
-  Serial.println("[OTA] 示例固件以打印占位，接入时实现 Update 分段写入 + 校验");
-  fwVersion = "1.3.0"; // 模拟升级成功
-  publishStatus();
+/* mbedtls 2.x / 3.x API 兼容（ESP32 core 2.x 用 2.28，3.x 用 3.x） */
+#if MBEDTLS_VERSION_NUMBER >= 0x03000000
+  #define SHA256_STARTS(c)     mbedtls_sha256_starts((c), 0)
+  #define SHA256_UPDATE(c,d,l) mbedtls_sha256_update((c), (d), (l))
+  #define SHA256_FINISH(c,o)   mbedtls_sha256_finish((c), (o))
+#else
+  #define SHA256_STARTS(c)     mbedtls_sha256_starts_ret((c), 0)
+  #define SHA256_UPDATE(c,d,l) mbedtls_sha256_update_ret((c), (d), (l))
+  #define SHA256_FINISH(c,o)   mbedtls_sha256_finish_ret((c), (o))
+#endif
+
+/* 真 OTA：流式下载 → SHA256 校验 → 写备用分区 → 重启。
+ * 安全策略：不接受没有摘要的固件包（拒绝无校验升级）。
+ * 前置条件：分区表必须含双 APP 分区（Arduino IDE 选
+ *   「Minimal SPIFFS (1.9MB APP with OTA)」或 4MB 自定义分区表）；
+ *   默认「Default 4MB with spiffs」只有单 APP 分区，OTA 必然失败。 */
+bool otaFromUrl(const char* url, const char* expectSha) {
+  if (!url || !url[0]) { Serial.println("[OTA] URL 为空，拒绝"); return false; }
+  if (!expectSha || strlen(expectSha) != 64) {
+    Serial.println("[OTA] 拒绝：缺少 64 位 SHA256 摘要（不接受无校验固件）");
+    return false;
+  }
+  Serial.printf("[OTA] 开始 %s\n", url);
+  HTTPClient http;
+  http.setTimeout(15000);
+  http.begin(wifiClient, url);
+  esp_task_wdt_reset();                 // HTTP 连接可能占用接近超时上限，先喂狗
+  int code = http.GET();
+  esp_task_wdt_reset();
+  if (code != HTTP_CODE_OK) {
+    Serial.printf("[OTA] HTTP %d，失败\n", code);
+    http.end();
+    return false;
+  }
+  int total = http.getSize();
+  if (total <= 0) { Serial.println("[OTA] 长度未知，失败"); http.end(); return false; }
+  if (!Update.begin(total)) {
+    Serial.printf("[OTA] 空间不足/分区不支持，err=%u（检查分区表是否含 OTA 双分区）\n", Update.getError());
+    http.end();
+    return false;
+  }
+
+  mbedtls_sha256_context ctx;
+  mbedtls_sha256_init(&ctx);
+  SHA256_STARTS(&ctx);
+
+  unsigned char buf[1024];
+  unsigned chunk = 0;
+  int remain = total;
+  Stream& s = http.getStream();
+  bool ok = true;
+  while (remain > 0) {
+    int n = s.readBytes(buf, remain > 1024 ? 1024 : remain);
+    if (n <= 0) { ok = false; break; }
+    SHA256_UPDATE(&ctx, buf, (unsigned)n);
+    if (Update.write(buf, (size_t)n) != (size_t)n) { ok = false; break; }
+    remain -= n;
+    if (++chunk % 32 == 0) esp_task_wdt_reset();   // 每 32KB 喂狗（不能用 remain%32768，非整数倍时永不命中）
+  }
+  unsigned char out[32];
+  SHA256_FINISH(&ctx, out);
+  mbedtls_sha256_free(&ctx);
+
+  if (!ok) { Update.abort(); http.end(); Serial.println("[OTA] 下载中断，已回滚"); return false; }
+  http.end();
+
+  String hex;
+  for (int i = 0; i < 32; i++) { char b[3]; snprintf(b, sizeof(b), "%02x", out[i]); hex += b; }
+  if (!constantTimeEq(hex, String(expectSha))) {
+    Update.abort();
+    Serial.printf("[OTA] 摘要不匹配，已回滚（期望 %.8s… 实际 %.8s…）\n", expectSha, hex.c_str());
+    return false;
+  }
+  if (!Update.end(true)) {
+    Serial.printf("[OTA] 写入失败 err=%u\n", Update.getError());
+    return false;
+  }
+  Serial.println("[OTA] 校验通过，重启进入新固件");
+  delay(300);
+  ESP.restart();
   return true;
 }
 
@@ -586,8 +862,9 @@ bool otaFromUrl(const char* url) {
 void publishSnap() {
   StaticJsonDocument<512> doc;
   doc["id"] = DEVICE_ID;
-  doc["ts"] = millis();
-  doc["seq"] = millis();
+  doc["ts"] = nowEpoch();
+  doc["tsConf"] = timeReady ? "synced" : "unset";
+  doc["seq"] = (unsigned long)esp_random();
   JsonObject sensors = doc.createNestedObject("sensors");
   collectSensors(sensors);
   doc["personPresent"] = false;
@@ -602,8 +879,21 @@ void publishSnap() {
 /* 处理后台下行指令 */
 void onCmd(const String& payload) {
   StaticJsonDocument<1024> doc;
-  if (deserializeJson(doc, payload)) return;
-  const char* cmd = doc["cmd"];
+  if (deserializeJson(doc, payload.c_str())) {
+    Serial.println("[SEC] 指令 JSON 解析失败，已丢弃");
+    return;
+  }
+  const char* cmd   = doc["cmd"]   | "";
+  const char* nonce = doc["nonce"] | "";
+
+  /* 安全门：验签失败一律不执行（防伪造、防重放），并回执说明原因 */
+  String why;
+  if (!verifyCmdSig(doc.as<JsonObject>(), cmd, why)) {
+    Serial.printf("[SEC] 拒绝 %s：%s\n", cmd, why.c_str());
+    localEvent("security", "warn", ("指令被拒: " + String(cmd) + " " + why).c_str());
+    publishAck(cmd, false, why.c_str(), nonce);
+    return;
+  }
 
   if (strcmp(cmd, "devmode") == 0) {
     devmode = doc["on"] | false;
@@ -623,13 +913,18 @@ void onCmd(const String& payload) {
     publishStatus();
   } else if (strcmp(cmd, "reboot") == 0) {
     Serial.println("[CMD] 收到重启指令：软重启（配置保留）");
+    publishAck(cmd, true, "即将重启", nonce);
     delay(200);
     ESP.restart();
   } else if (strcmp(cmd, "ota") == 0) {
     const char* url = doc["url"] | "";
     const char* ver = doc["version"] | "";
+    const char* sha = doc["sha256"] | "";
     Serial.printf("[CMD] OTA → v%s\n", ver);
-    otaFromUrl(url);
+    publishAck(cmd, true, "开始下载固件", nonce);
+    bool ok = otaFromUrl(url, sha);          // 成功会直接重启，不返回
+    publishAck(cmd, false, ok ? "已完成但未重启" : "OTA 失败，已保留旧固件", nonce);
+    return;
   } else if (strcmp(cmd, "set_params") == 0) {
     // 数值钳制：与后台同一套合法范围，防无效/越界参数写入 NVS（真机最后防线）
     JsonObject p = doc["params"];
@@ -675,22 +970,24 @@ void onCmd(const String& payload) {
     Serial.printf("[CMD] 播报音量已调整为 %d%%（MAX98357A 增益随之变化）\n", vol);
     publishStatus();
   } else if (strcmp(cmd, "set_wifi") == 0) {
-    // 后台「设备页 WiFi 配置」下发：保存 SSID/密码并重连（支持换网络/改密码）
+    // 后台「设备页 WiFi 配置」下发：保存 SSID/密码，交给状态机异步重连（不再阻塞 20s）
     const char* ssid = doc["ssid"] | "";
     const char* pass = doc["pass"] | "";
     if (strlen(ssid) > 0) {
       prefs.putString("wifi_ssid", ssid);
       prefs.putString("wifi_pass", pass);
-      Serial.printf("[CMD] WiFi 配置已保存并重连：%s\n", ssid);
-      delay(100);
+      Serial.printf("[CMD] WiFi 配置已保存：%s（非阻塞重连）\n", ssid);
       WiFi.disconnect();
-      WiFi.begin(ssid, pass);
-      unsigned long t0 = millis();
-      while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) delay(500);
-      Serial.println(WiFi.status() == WL_CONNECTED ? "[WIFI] 重连成功" : "[WIFI] 重连失败，保持离线等待重试");
-      publishStatus();
+      wifiState = WIFI_IDLE;
+      wifiRetryCount = 0;
+      wifiBackoffMs = 5000;
     }
+  } else {
+    publishAck(cmd, false, "未知指令", nonce);
+    return;
   }
+  publishStatus();
+  publishAck(cmd, true, "已执行", nonce);
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int len) {
@@ -700,27 +997,42 @@ void mqttCallback(char* topic, byte* payload, unsigned int len) {
 }
 
 unsigned long lastMqttRetry = 0;
+unsigned long mqttBackoffMs = 5000;
+int mqttRetryCount = 0;
 
 void connectMqtt() {
   if (mqtt.connected()) return;
+  if (wifiState != WIFI_UP) return;          // 网络没起来就不空转重连
   unsigned long now = millis();
-  if (now - lastMqttRetry < NET_RETRY_MS) return; // 5s 节流：失败不阻塞主循环（串口调试/检测逻辑持续可用）
+  if (now - lastMqttRetry < mqttBackoffMs) return;
   lastMqttRetry = now;
-  if (WiFi.status() != WL_CONNECTED) { WiFi.reconnect(); return; } // WiFi 掉线先重连，下个节流窗口再试 MQTT
-  bool ok = strlen(MQTT_USER) > 0 ? mqtt.connect(DEVICE_ID, MQTT_USER, MQTT_PASS) : mqtt.connect(DEVICE_ID);
+  bool ok = strlen(MQTT_USER) > 0 ? mqtt.connect(DEVICE_ID, MQTT_USER, MQTT_PASS)
+                                  : mqtt.connect(DEVICE_ID);
   if (ok) {
+    mqttRetryCount = 0;
+    mqttBackoffMs = 5000;
     Serial.println("[MQTT] 已连接，订阅指令通道");
     mqtt.subscribe(topic("cmd").c_str());
+    if (!timeReady) syncTimeAnchor();
     publishStatus();
   } else {
-    Serial.printf("[MQTT] 连接失败 rc=%d，5s 后重试（不影响串口调试与本地检测）\n", mqtt.state());
+    mqttRetryCount++;
+    int sh = mqttRetryCount > 5 ? 5 : mqttRetryCount;
+    mqttBackoffMs = 5000UL * (1UL << sh);            // 10/20/40/80/160/320s
+    if (mqttBackoffMs > 300000UL) mqttBackoffMs = 300000UL;
+    Serial.printf("[MQTT] 失败 rc=%d，%lus 后重试（不影响本地检测）\n",
+                  mqtt.state(), mqttBackoffMs / 1000);
   }
 }
 
 void setup() {
   Serial.begin(115200);
   prefs.begin("kitchen", false);
-  // 读取持久化参数；NVS 数据损坏/越界时重置为默认（防上电读到垃圾参数影响检测）
+
+  /* 1. 先定身份：后续所有 topic 都依赖它 */
+  initDeviceId();
+
+  /* 2. 参数读取：损坏或越界即恢复默认（防上电读到垃圾参数） */
   size_t plen = prefs.getBytes("params", &params, sizeof(params));
   if (plen != sizeof(params)) {
     params = Params();
@@ -731,20 +1043,35 @@ void setup() {
   }
   restoreVoice(); // 恢复 4 条语音话术（重启不丢失）
 
+  /* 3. 指令签名密钥：NVS 优先，其次编译默认值 */
+  String sk = prefs.getString("cmd_secret", "");
+  if (sk.length() == 0) sk = String(CMD_SECRET_DEFAULT);
+  sk.toCharArray(cmdSecret, sizeof(cmdSecret));
+  if (strlen(cmdSecret) == 0) {
+    Serial.println("[SEC] 未配置指令签名密钥：下行指令不做验签（仅调试可用，上线前必须配置）");
+  } else {
+    Serial.println("[SEC] 指令签名已启用，未签名/重放指令将被拒绝");
+  }
+
+  /* 4. 看门狗先开：让任何后续死循环都能自恢复 */
+  wdtInit();
+
+  /* 5. 网络只起状态机，绝不在这里等待 —— 报警路径必须先于联网就绪 */
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.print("[WIFI] 连接中");
-  unsigned long w0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - w0 < WIFI_CONNECT_TIMEOUT_MS) { delay(500); Serial.print("."); }
-  Serial.println(WiFi.status() == WL_CONNECTED ? "\n[WIFI] 已连接" : "\n[WIFI] 连接超时，稍后自动重试（有线调试与本地检测仍可用）");
+  wifiState = WIFI_IDLE;
 
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
+  mqtt.setBufferSize(MQTT_MAX_PACKET_SIZE);   // 与宏双保险，防大报文被截断
   bootTs = millis();
+  Serial.printf("[BOOT] 固件 %s 启动完成，进入主循环（网络异步，本地检测立即可用）\n", fwVersion.c_str());
 }
 
 void loop() {
-  pollSerialDbg(); // 有线调试：处理 USB 串口指令
+  esp_task_wdt_reset();     // 喂狗：能跑到这里说明主循环还活着
+
+  pollSerialDbg();          // 有线调试：处理 USB 串口指令
+  wifiTick();               // 非阻塞 Wi-Fi 状态机
 
   if (!mqtt.connected()) connectMqtt();
   mqtt.loop();
