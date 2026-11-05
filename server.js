@@ -30,6 +30,35 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/vendor/esptool-js', express.static(path.join(__dirname, 'node_modules', 'esptool-js')));
 app.use('/firmware-store', express.static(config.firmwareDir));
 
+/* ---------------- 管理口令（可选）：ADMIN_TOKEN 非空时启用，所有 /api 需带 X-Admin-Token ---------------- */
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+// 以下接口豁免（设备/健康/口令验证/OTA 固件下载——固件 HTTP 下载不带令牌）
+const AUTH_EXEMPT = new Set([
+  '/api/health',
+  '/api/auth/status',
+  '/api/auth/verify'
+]);
+app.use('/api', (req, res, next) => {
+  if (!ADMIN_TOKEN) return next();                                  // 未配置=兼容放行
+  const p = req.path;
+  if (AUTH_EXEMPT.has(p)) return next();
+  if (/^\/firmwares\/[^/]+\/download$/.test(p)) return next();      // OTA 下载豁免
+  const t = req.get('X-Admin-Token') || '';
+  if (t.length !== ADMIN_TOKEN.length || !crypto.timingSafeEqual(Buffer.from(t), Buffer.from(ADMIN_TOKEN))) {
+    return res.status(401).json({ error: '未授权：缺少或错误的管理口令（X-Admin-Token）' });
+  }
+  next();
+});
+app.get('/api/auth/status', (req, res) => res.json({ enabled: !!ADMIN_TOKEN }));
+app.post('/api/auth/verify', (req, res) => {
+  const t = (req.body && req.body.token) || '';
+  if (!ADMIN_TOKEN) return res.json({ ok: true, enabled: false });
+  if (t.length !== ADMIN_TOKEN.length || !crypto.timingSafeEqual(Buffer.from(t), Buffer.from(ADMIN_TOKEN))) {
+    return res.status(401).json({ error: '口令错误' });
+  }
+  res.json({ ok: true, enabled: true });
+});
+
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 

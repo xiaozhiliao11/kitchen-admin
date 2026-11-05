@@ -262,9 +262,13 @@ const kv = (k, v) => '<div class="kv"><div class="k">' + k + '</div><div class="
 async function api(path, opt) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 12000); // 12 秒超时：避免网络半断时界面长时间无响应
+  const headers = { 'Content-Type': 'application/json' };
+  const tok = localStorage.getItem('xz_admin_token') || '';
+  if (tok) headers['X-Admin-Token'] = tok;
   try {
-    const r = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal }, opt));
+    const r = await fetch(path, Object.assign({ headers, signal: ctrl.signal }, opt));
     clearTimeout(t);
+    if (r.status === 401) { localStorage.removeItem('xz_admin_token'); showAuthGate(); throw new Error('未授权：请输入管理口令'); }
     return r.json();
   } catch (e) {
     clearTimeout(t);
@@ -1355,9 +1359,12 @@ async function uploadFirmware() {
   if (!file) { $('#fw-msg').textContent = '请先选择 .bin 固件文件'; return; }
   $('#fw-up').disabled = true; $('#fw-up').textContent = '上传中…';
   try {
+    const headers = { 'Content-Type': 'application/octet-stream', 'X-Fw-Name': file.name.replace(/\.bin$/i, ''), 'X-Fw-Version': version, 'X-Fw-Note': note };
+    const tok = localStorage.getItem('xz_admin_token') || '';
+    if (tok) headers['X-Admin-Token'] = tok;
     const r = await fetch('/api/firmwares/upload', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream', 'X-Fw-Name': file.name.replace(/\.bin$/i, ''), 'X-Fw-Version': version, 'X-Fw-Note': note },
+      headers,
       body: file
     });
     const j = await r.json();
@@ -1748,7 +1755,52 @@ function refreshEvents() { const tb = $('#tab-body'); if (tb && curTab() === 'ev
 function curTab() { const t = document.querySelector('.tab.on'); return t ? t.dataset.tab : null; }
 
 /* ================= 启动 ================= */
+/* 管理口令门：服务端配置 ADMIN_TOKEN 后，先验证口令再加载数据 */
+function showAuthGate() {
+  if (document.getElementById('auth-gate')) return;
+  const gate = document.createElement('div');
+  gate.id = 'auth-gate';
+  gate.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,25,40,.92);display:flex;align-items:center;justify-content:center;';
+  gate.innerHTML = '<div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:340px;width:90%;box-sizing:border-box;text-align:center">' +
+    '<h3 style="margin:0 0 6px">小知了厨房卫士后台</h3>' +
+    '<p class="muted" style="margin:0 0 14px">已开启管理口令保护，请输入口令后使用。</p>' +
+    '<input id="auth-token" type="password" placeholder="管理口令" style="width:100%;box-sizing:border-box;padding:10px 12px;font-size:16px;border:1px solid #ccd;border-radius:8px">' +
+    '<button id="auth-ok" class="primary" style="width:100%;margin-top:12px">进入后台</button>' +
+    '<div id="auth-err" class="muted" style="margin-top:10px;color:#c33"></div></div>';
+  document.body.appendChild(gate);
+  const input = document.getElementById('auth-token');
+  const doVerify = async () => {
+    const token = input.value.trim();
+    if (!token) { document.getElementById('auth-err').textContent = '请输入口令'; return; }
+    document.getElementById('auth-err').textContent = '验证中…';
+    try {
+      const r = await fetch('/api/auth/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+      const j = await r.json();
+      if (r.ok && j.ok) { localStorage.setItem('xz_admin_token', token); location.reload(); }
+      else document.getElementById('auth-err').textContent = (j && j.error) || '口令错误';
+    } catch (e) { document.getElementById('auth-err').textContent = '验证失败：请检查网络'; }
+  };
+  document.getElementById('auth-ok').onclick = doVerify;
+  input.onkeydown = (e) => { if (e.key === 'Enter') doVerify(); };
+  input.focus();
+}
+
 async function boot() {
+  // 管理口令门：服务端启用后，未验证前不加载数据
+  try {
+    const st = await api('/api/auth/status');
+    if (st && st.enabled) {
+      const tok = localStorage.getItem('xz_admin_token') || '';
+      let ok = false;
+      if (tok) {
+        try {
+          const v = await fetch('/api/auth/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) });
+          ok = v.ok;
+        } catch (e) { ok = false; }
+      }
+      if (!ok) { localStorage.removeItem('xz_admin_token'); showAuthGate(); return; }
+    }
+  } catch (e) { /* 服务不可达：继续加载，顶部状态会显示服务离线 */ }
   // 并行发起：健康检查 / 设备列表 / 固件库 / 事件预热，互不阻塞，首屏更快
   const [h] = await Promise.all([
     api('/api/health').catch(() => null),
