@@ -640,9 +640,18 @@ app.post('/api/devices/:id/params', deviceParam, (req, res) => {
 app.post('/api/devices/:id/voice', deviceParam, (req, res) => {
   const { voice } = req.body || {};
   if (!voice || typeof voice !== 'object') return res.status(400).json({ error: '缺少 voice 对象' });
-  publishCmd(req.deviceId, { cmd: 'set_voice', voice });
+  // 每条话术 ≤80 字：防超长话术撑爆固件 status 报文缓冲（JSON 截断 → 心跳被丢弃 → 误判离线）
+  const trimmed = {};
+  for (const k of Object.keys(voice)) {
+    const s = String(voice[k] || '').trim();
+    if (!s) continue;
+    if (s.length > 80) return res.status(400).json({ error: `话术「${k}」超过 80 字上限（当前 ${s.length} 字）` });
+    trimmed[k] = s;
+  }
+  if (!Object.keys(trimmed).length) return res.status(400).json({ error: '语音话术不能为空' });
+  publishCmd(req.deviceId, { cmd: 'set_voice', voice: trimmed });
   store.addEvent({ device: req.deviceId, type: 'voice', level: 'info', text: '已下发语音话术', ts: Date.now() });
-  res.json({ ok: true, voice, warn: offlineWarn(req.deviceId) });
+  res.json({ ok: true, voice: trimmed, warn: offlineWarn(req.deviceId) });
 });
 
 /* =============== AI 模型 + 检测工作流 设置中心 =============== */

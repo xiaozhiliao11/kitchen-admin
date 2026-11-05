@@ -459,7 +459,7 @@ function renderMain() {
 function tabBar() {
   /* 配网/连 WiFi 只在「设备在身边」时才有意义：手机端后台提供入口，
      电脑端后台不提供（连 WiFi 需连设备热点，桌面浏览器无此场景）。 */
-  const isMobile = /Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent || '');
+  const isMobile = isMobileDevice();
   const tabs = [['overview','概览'],['live','实时'],['diag','自检与故障'],['events','事件'],['params','参数与语音'],['ota','OTA升级']];
   if (isMobile) tabs.splice(5, 0, ['wifi','WiFi 配置']);
   return '<div class="tabs">' + tabs.map((t) => '<div class="tab" data-tab="' + t[0] + '">' + t[1] + '</div>').join('') + '</div>';
@@ -696,10 +696,10 @@ function paramsTab() {
     '<div class="fitem" style="margin-bottom:8px"><label>播报音量（0~100，主机 I2S 功放真实调节）· 当前：' + (cur.volume != null ? cur.volume + '%' : '未上报') + '</label>' +
     '<input type="range" id="v-volume" min="0" max="100" step="5" value="' + (cur.volume != null ? cur.volume : 80) + '" style="width:100%">' +
     '<div style="font-size:12px;color:var(--sub);margin-top:2px">音量 <span id="v-volume-val">' + (cur.volume != null ? cur.volume : 80) + '</span>%</div></div>' +
-    '<div class="fitem" style="margin-bottom:8px"><label>燃气泄漏话术</label><input id="v-gas_leak" value="' + esc(voice.gas_leak) + '"></div>' +
-    '<div class="fitem" style="margin-bottom:8px"><label>忘关火话术</label><input id="v-forgot_stove" value="' + esc(voice.forgot_stove) + '"></div>' +
-    '<div class="fitem" style="margin-bottom:8px"><label>低电提醒话术</label><input id="v-low_battery" value="' + esc(voice.low_battery) + '"></div>' +
-    '<div class="fitem" style="margin-bottom:8px"><label>自检通过话术</label><input id="v-test_ok" value="' + esc(voice.test_ok) + '"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>燃气泄漏话术</label><input id="v-gas_leak" maxlength="80" value="' + esc(voice.gas_leak) + '"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>忘关火话术</label><input id="v-forgot_stove" maxlength="80" value="' + esc(voice.forgot_stove) + '"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>低电提醒话术</label><input id="v-low_battery" maxlength="80" value="' + esc(voice.low_battery) + '"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>自检通过话术</label><input id="v-test_ok" maxlength="80" value="' + esc(voice.test_ok) + '"></div>' +
     '<div class="row" style="margin-top:10px"><button class="primary" id="v-save">下发语音内容</button>' +
     '<button id="v-vol-save">下发音量</button></div></div>';
 }

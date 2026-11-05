@@ -306,8 +306,8 @@ void dbgEventReply(int n) {
   doc["ok"] = true;
   JsonArray arr = doc.createNestedArray("events");
   for (int i = 0; i < n; i++) {
-    int idx = (dbgEventHead - n + i + DBG_EVENT_BUF * 2) % DBG_EVENT_BUF;
-    if (idx < 0 || idx >= DBG_EVENT_BUF || i >= dbgEventCount) continue;
+    if (i >= dbgEventCount) continue;                        // 只取实际已写入的条数
+    int idx = (dbgEventHead - 1 - i + DBG_EVENT_BUF * 2) % DBG_EVENT_BUF; // 从最新一条倒序取
     JsonObject e = arr.createNestedObject();
     e["type"] = dbgEvents[idx].type;
     e["level"] = dbgEvents[idx].level;
@@ -321,7 +321,7 @@ void dbgEventReply(int n) {
 
 /* DBG:get <key> —— 读取参数/语音/工作流/音量/WiFi */
 void dbgGetReply(const String& key) {
-  StaticJsonDocument<900> doc;
+  StaticJsonDocument<1500> doc;
   doc["dbg"] = "get";
   doc["ok"] = true;
   doc["key"] = key;
@@ -356,7 +356,7 @@ void dbgGetReply(const String& key) {
     doc["ok"] = false;
     doc["error"] = "未知 key（可选：params/voice/workflow/volume/wifi）";
   }
-  char buf[950];
+  char buf[1600];
   serializeJson(doc, buf);
   Serial.println(buf);
 }
@@ -890,7 +890,7 @@ void collectSensors(JsonObject sensors) {
 
 /* 心跳/状态上报 */
 void publishStatus() {
-  StaticJsonDocument<1024> doc;
+  StaticJsonDocument<2048> doc;
   doc["id"] = DEVICE_ID;
   doc["ts"] = nowEpoch();
   doc["tsConf"] = timeReady ? "synced" : "unset";
@@ -913,7 +913,7 @@ void publishStatus() {
   doc["wifi_ssid"] = prefs.getString("wifi_ssid", "");
   doc["workflow_version"] = prefs.getString("wf_version", "");
   doc["volume"] = prefs.getInt("volume", 80);
-  char buf[1600];
+  char buf[1900];
   serializeJson(doc, buf);
   mqtt.publish(topic("status").c_str(), buf);
 }

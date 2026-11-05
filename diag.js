@@ -31,8 +31,8 @@ const FAULT_CODES = {
   M1: {
     sensor: '声敏传感器',
     reason: '无声音信号输出',
-    causes: ['GPIO11 接线断开', '灵敏度电位器旋到最低', '传感器损坏'],
-    advice: '检查 GPIO11 接线；顺时针微调灵敏度电位器后重测'
+    causes: ['GPIO20 接线断开（V64.1 勘误后声敏=GPIO20）', '灵敏度电位器旋到最低', '传感器损坏'],
+    advice: '检查 GPIO20 接线；顺时针微调灵敏度电位器后重测'
   },
   L1: {
     sensor: '光敏传感器',
@@ -55,8 +55,8 @@ const FAULT_CODES = {
   S1: {
     sensor: '语音功放 MAX98357A',
     reason: 'I2S 输出异常（喇叭无声）',
-    causes: ['喇叭接线断', 'MAX98357A 供电不足（3.3V 峰值电流 625mA）', 'GPIO15(SD 使能) 未接对'],
-    advice: '检查 GPIO12/13/14/15 与喇叭接线；确认功放供电与共地'
+    causes: ['喇叭接线断', 'MAX98357A 供电不足（3.3V 峰值电流 625mA）', 'I2S 接线错（V64.1 勘误后 BCK=GPIO9/WS=18/DIN=21）'],
+    advice: '检查 GPIO9/18/21 与喇叭接线；确认功放供电与共地'
   }
 };
 
