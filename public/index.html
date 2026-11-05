@@ -482,8 +482,10 @@ function wifiTab() {
   const curSsid = snap.wifi_ssid || '';
   return '<div class="card"><h3>设备配网（WiFi）</h3>' +
     '<p class="muted" style="margin-bottom:8px">' + (curSsid ? '当前主机连接：<b>' + esc(curSsid) + '</b>' : '当前主机连接：未上报（设备可能未配网或离线）') + '。<br/>配网必须设备在身边：<b>长按设备按键 3 秒</b>（或首次开机自动）进入配网模式，热点名 <b>XZL-</b> 开头。</p>' +
-    '<div style="margin-top:10px"><button class="primary" id="wf-guide">打开配网页（192.168.4.1）</button></div>' +
-    '<p class="muted" style="margin-top:10px;line-height:1.7">① 长按设备按键 3 秒进入配网模式<br/>② 打开手机 WiFi 设置，连接 <b>XZL-</b> 开头热点<br/>③ 点上面按钮打开配网页；若无法跳转，在浏览器手动输入 <b>http://192.168.4.1</b><br/>④ 在列表中点选你家 WiFi，输入密码，完成配网</p></div>';
+    '<div style="margin-top:10px" class="row">' +
+    '<a class="primary" id="wf-guide" href="http://192.168.4.1" target="_blank" rel="noopener">打开配网页（192.168.4.1）</a>' +
+    '<button id="wf-copy">复制配网地址</button></div>' +
+    '<p class="muted" style="margin-top:10px;line-height:1.7">① 长按设备按键 3 秒进入配网模式<br/>② 打开手机 WiFi 设置，连接 <b>XZL-</b> 开头热点<br/>③ 点「打开配网页」；若浏览器拦截/打不开，点「复制配网地址」粘贴到地址栏打开<br/>④ 在列表中点选你家 WiFi，输入密码，完成配网</p></div>';
 }
 
 function bindTabs() {
@@ -495,13 +497,6 @@ function bindTabs() {
   });
   const dmOn = $('#dm-on'); if (dmOn) dmOn.onclick = () => setDevMode(true);
   const dmOff = $('#dm-off'); if (dmOff) dmOff.onclick = () => setDevMode(false);
-  const wfGuide = $('#wf-guide');
-  if (wfGuide) wfGuide.onclick = () => {
-    /* 手机连上设备热点后打开配网页；https 页面 window.open 到 http 可能被拦，给手动兜底 */
-    let w = null;
-    try { w = window.open('http://192.168.4.1'); } catch (e) { w = null; }
-    if (!w) alert('请在浏览器地址栏手动输入：http://192.168.4.1');
-  };
   document.querySelectorAll('.tab').forEach((t) => { if (t.dataset.tab === 'overview') t.classList.add('on'); });
   bindTabActions('overview');
 }
@@ -1614,12 +1609,16 @@ function bindTabActions(tab) {
     }
   }
   if (tab === 'wifi') {
-    /* 配网页打开：手机连上 XZL- 热点后，从 https 后台跳 http://192.168.4.1 可能被拦，给手动兜底 */
-    const wfGuide = $('#wf-guide');
-    if (wfGuide) wfGuide.onclick = () => {
-      let w = null;
-      try { w = window.open('http://192.168.4.1'); } catch (e) { w = null; }
-      if (!w) alert('请在浏览器地址栏手动输入：http://192.168.4.1');
+    /* 配网页打开：wf-guide 是真实 <a> 链接（浏览器原生导航，比 window.open 可靠）；
+       另给「复制地址」兜底，绕过 https→http 跳转限制 */
+    const wfCopy = $('#wf-copy');
+    if (wfCopy) wfCopy.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText('http://192.168.4.1');
+        alert('配网地址已复制：http://192.168.4.1\n请粘贴到浏览器地址栏打开（需先连上 XZL- 热点）。');
+      } catch (e) {
+        alert('复制失败，请手动输入：http://192.168.4.1');
+      }
     };
   }
   if (tab === 'ota') {
