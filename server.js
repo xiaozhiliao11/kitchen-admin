@@ -698,6 +698,8 @@ app.get('/api/devices', (req, res) => {
       userName: d.meta && d.meta.userName,
       userPhone: d.meta && d.meta.userPhone,
       deviceAddr: d.meta && d.meta.deviceAddr,
+      ...modelOf(d.meta),
+      mac: (d.meta && d.meta.mac) || null,
       createdAt: d.createdAt || 0,
       volume: d.volume != null ? d.volume : null,
       online: !!d.online,
@@ -711,8 +713,6 @@ app.get('/api/devices', (req, res) => {
       devmode: !!d.devmode,
       devmodeUntil: d.devmodeUntil || 0,
       lastEvent: d.lastEvent,
-      ...modelOf(d.meta),
-      mac: (d.meta && d.meta.mac) || null,
       lastDiagResult: d.lastDiag ? d.lastDiag.result : null,
       lastDiagAt: d.lastDiag ? d.lastDiag.ts : 0
     };
@@ -755,6 +755,8 @@ app.get('/api/devices/:id', deviceParam, (req, res) => {
       userName: d.meta && d.meta.userName,
       userPhone: d.meta && d.meta.userPhone,
       deviceAddr: d.meta && d.meta.deviceAddr,
+      ...modelOf(d.meta),
+      mac: (d.meta && d.meta.mac) || null,
       createdAt: d.createdAt || 0,
       volume: d.volume != null ? d.volume : null,
       online: !!d.online,
