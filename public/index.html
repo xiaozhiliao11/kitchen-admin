@@ -629,7 +629,7 @@ function liveTab() {
       '<button class="primary" id="dm-on2">打开开发者模式</button>';
   }
   const sensors = liveSensors(cur.snapshot);
-  return '<div class="live-row">' + sensors.map((s) => '<div class="kv"><div class="k">' + s.name + '</div><div class="v" data-live="' + s.key + '">' + s.val + '</div></div>').join('') + '</div>' +
+  return '<div class="live-row">' + sensors.map((s) => '<div class="kv"><div class="k">' + esc(s.name) + '</div><div class="v" data-live="' + esc(s.key) + '">' + esc(String(s.val)) + '</div></div>').join('') + '</div>' +
     '<div class="muted" style="margin-top:8px">数据由主机高频实时上报，经 MQTT → WebSocket 实时刷新</div>';
 }
 function liveSensors(snap) {
@@ -643,9 +643,9 @@ function liveSensors(snap) {
 }
 function fmtSensor(k, v) {
   if (k === 'sht') return v && v.t != null ? Number(v.t).toFixed(2) + '℃ / ' + Number(v.h).toFixed(2) + '%' : '—';
-  if (k === 'radar') return v && v.presence != null ? (v.presence ? '有人 ' + v.dist + 'cm' : '无人') : '—';
-  if (k === 'mq') return v != null ? v + '' : '—';
-  return v != null ? String(v) : '—';
+  if (k === 'radar') return v && v.presence != null ? (v.presence ? '有人 ' + esc(String(v.dist)) + 'cm' : '无人') : '—';
+  if (k === 'mq') return v != null ? esc(String(v)) : '—';
+  return v != null ? esc(String(v)) : '—';
 }
 
 /* 自检与故障 Tab */
@@ -703,7 +703,7 @@ function diagTab() {
         const nm = ALL_SENSORS.find((x) => x.k === i.name);
         const stCls = i.status === 'ok' ? 'ok' : i.status === 'warn' ? 'warn' : 'err';
         const ic = i.status === 'ok' ? '✓' : i.status === 'warn' ? '△' : '✗';
-        return '<li class="' + stCls + '"><span class="dp-ic">' + ic + '</span><span class="dp-name">' + (nm ? nm.name : sensorName(i.name)) + (i.code ? '（' + i.code + '）' : '') + '</span><span class="dp-val">' + (i.value != null ? ' · 读数 ' + esc(String(i.value)) : '') + '</span></li>';
+        return '<li class="' + stCls + '"><span class="dp-ic">' + ic + '</span><span class="dp-name">' + (nm ? nm.name : sensorName(i.name)) + (i.code ? '（' + esc(String(i.code)) + '）' : '') + '</span><span class="dp-val">' + (i.value != null ? ' · 读数 ' + esc(String(i.value)) : '') + '</span></li>';
       }).join('') + '</ul>' : '') +
       (last.aiSummary ? '<div class="ai-box"><b>AI 综合分析：</b>' + esc(last.aiSummary) + '</div>' : '') +
       '<ul class="problist">' + (ps.length ? ps.map((p) => {
@@ -963,13 +963,13 @@ function renderDbgDiag(j) {
   if (items.length) html += '<ul class="diag-progress" style="margin-bottom:10px">' + items.map((i) => {
     const stCls = i.status === 'ok' ? 'ok' : i.status === 'warn' ? 'warn' : 'err';
     const ic = i.status === 'ok' ? '✓' : i.status === 'warn' ? '△' : '✗';
-    return '<li class="' + stCls + '"><span class="dp-ic">' + ic + '</span><span class="dp-name">' + (DBG_SENSOR_NAMES[i.name] || i.name) + (i.code ? '（' + i.code + '）' : '') + '</span><span class="dp-val">' + (i.value != null ? ' · 读数 ' + esc(String(i.value)) : '') + '</span></li>';
+    return '<li class="' + stCls + '"><span class="dp-ic">' + ic + '</span><span class="dp-name">' + esc(DBG_SENSOR_NAMES[i.name] || String(i.name)) + (i.code ? '（' + esc(String(i.code)) + '）' : '') + '</span><span class="dp-val">' + (i.value != null ? ' · 读数 ' + esc(String(i.value)) : '') + '</span></li>';
   }).join('') + '</ul>';
   html += '<ul class="problist">';
   if (!bad.length) html += '<li class="pass" style="border-left-color:var(--green)"><div class="pb-head">所有传感器与执行部件测试通过</div></li>';
   bad.forEach((i) => {
     const f = DBG_FAULT[i.code] || {};
-    html += '<li><div class="pb-head"><span>' + (DBG_SENSOR_NAMES[i.name] || i.name) + '</span><span class="code">' + esc(i.code || '') + '</span><span class="pb-sub">' + stShort(i.status) + (i.value != null ? ' · 读数 ' + esc(String(i.value)) : '') + '</span></div>' +
+    html += '<li><div class="pb-head"><span>' + esc(DBG_SENSOR_NAMES[i.name] || String(i.name)) + '</span><span class="code">' + esc(i.code || '') + '</span><span class="pb-sub">' + stShort(i.status) + (i.value != null ? ' · 读数 ' + esc(String(i.value)) : '') + '</span></div>' +
       '<div class="pb-body"><b>原因：</b>' + esc(f.reason || i.detail || '未知') + '</div>' +
       (f.causes ? '<div class="pb-body"><b>可能原因：</b>' + esc(f.causes.join('；')) + '</div>' : '') +
       (f.advice ? '<div class="pb-body"><b>排查建议：</b>' + esc(f.advice) + '</div>' : '') + '</li>';

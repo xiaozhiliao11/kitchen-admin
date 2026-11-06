@@ -24,6 +24,15 @@ const { analyzeDiag } = require('./diag');
 const { DEFAULT_WORKFLOW, DEFAULT_AI, sanitizeWorkflow, sanitizeAI, runWorkflow } = require('./workflow');
 
 const app = express();
+app.disable('x-powered-by');
+// 统一安全响应头：防点击劫持（ifram 嵌入后台骗管理员点删除）、防 MIME 嗅探、防 Referer 带出地址
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
+  next();
+});
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 // 前端烧录依赖：esptool-js 浏览器库（WebSerial 真烧录）+ 固件库静态目录
@@ -144,7 +153,8 @@ app.use('/api', (req, res, next) => {
   const p = (req.originalUrl || req.url || '').split('?')[0];
   if (AUTH_EXEMPT.has(p)) return next();
   if (/^\/api\/firmwares\/[^/]+\/download$/.test(p)) return next();
-  const u = verifyToken(req.get('X-Admin-Token') || req.query.token || '');
+  // 只认请求头，不接受 ?token=（URL 里的令牌会进访问日志、浏览器历史、截图，极易泄露）
+  const u = verifyToken(req.get('X-Admin-Token') || '');
   if (!u) return res.status(401).json({ error: '未登录或登录已失效，请重新登录' });
   req.user = u;
   next();
@@ -330,6 +340,26 @@ function warnBadStatus(device, reason, msg) {
   console.warn(`[MQTT] 丢弃${reason}（${device}）：${JSON.stringify(msg).slice(0, 100)}`);
 }
 
+/** 深度净化入站载荷：公共 broker 无鉴权，任何人都能往同名主题发消息。
+ *  字符串一律截断并剔除尖括号，数字必须是有限数值，键名限定字符集，避免恶意载荷变成前端 HTML。 */
+function deepSanitize(v, depth) {
+  const d = depth || 0;
+  if (d > 3) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') return v.slice(0, 64).replace(/[<>]/g, '');
+  if (Array.isArray(v)) return v.slice(0, 32).map((x) => deepSanitize(x, d + 1));
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const k of Object.keys(v).slice(0, 32)) {
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(k)) continue;
+      o[k] = deepSanitize(v[k], d + 1);
+    }
+    return o;
+  }
+  return null;
+}
+
 function handleStatus(device, msg) {
   // 载荷校验：任何人都能往 broker 的同名主题发消息，垃圾载荷/冒名心跳不能污染设备状态
   // （典型症状：收到 {"online":0} 这类载荷后设备被永久显示"在线"，状态与真实完全脱钩）
@@ -337,6 +367,9 @@ function handleStatus(device, msg) {
   if (msg.id != null && String(msg.id) !== device) return warnBadStatus(device, '冒名心跳（载荷 id 与主题不符）', msg);
   const recognizable = msg.state != null || msg.battery != null || msg.fw != null || msg.sensors != null;
   if (!recognizable) return warnBadStatus(device, '无法识别的状态载荷', msg);
+
+  // 入站载荷先净化再用（id 校验与可识别性判断在净化前完成，不受影响）
+  msg = deepSanitize(msg) || {};
 
   const now = Date.now();
   const prev = store.getDevice(device);
