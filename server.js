@@ -184,7 +184,7 @@ function loginFail(account) {
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 // 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
-const APP_VERSION = '1.0.6';
+const APP_VERSION = '1.0.7';
 
 // 上行数据签名密钥：与固件 dev_secret 同值。未设置时进入兼容模式（只记录不拦截），
 // 设置 DEV_SECRET_STRICT=1 后才强制丢弃未签名/签名错误的上报。
@@ -961,7 +961,8 @@ app.get('/api/insights/overview', (req, res) => {
   // days=0 表示「全部」：从最早一条事件算起；1~30 为窗口天数
   const raw = parseInt(req.query.days, 10);
   const days = raw === 0 ? 0 : Math.min(30, Math.max(1, raw || 7));
-  res.json(insights.buildOverview(store, days));
+  const modelId = String(req.query.model || '').trim();
+  res.json(insights.buildOverview(store, days, modelId));
 });
 
 /** 单机明细：事件时间线、活跃时段、离线间隔（由事件间隔推断） */

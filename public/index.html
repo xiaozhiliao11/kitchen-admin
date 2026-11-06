@@ -281,6 +281,10 @@ table.ins-table{width:100%;border-collapse:collapse;font-size:13px;table-layout:
   .ins-charts{grid-template-columns:repeat(3,1fr)}
 }
 
+/* 手机端：串口相关功能一律不显示（CSS 兜底，防止脚本时机问题） */
+body.is-mobile .navbtn[data-view="flash"],
+body.is-mobile .navbtn[data-view="debug"] { display: none !important; }
+
 /* 无线测试 */
 .wt-form{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
 .wt-form label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#646A73}
@@ -315,7 +319,7 @@ table.ins-table{width:100%;border-collapse:collapse;font-size:13px;table-layout:
   <button class="later" id="upbar-later">稍后</button>
 </div>
 <header>
-  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.6</span></h1>
+  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.7</span></h1>
   <nav class="topnav" id="topnav">
     <div class="navbtn on" data-view="devices">全部设备</div>
     <div class="navbtn" data-view="insights">用户数据库</div>
@@ -478,7 +482,8 @@ function renderHome() {
     if (box.style.display === 'block') {
       box.innerHTML =
         '<h3>添加设备（新主机入网登记）</h3>' +
-        '<p class="muted" style="margin-bottom:10px">设备 ID 是主机固件里 DEVICE_ID 的编码，两者一致才能收到该主机上报。留空自动生成：A+年份+日期+四位编号（当天递增，如 A202610310001）。添加后将记录当前时间为设备添加时间。</p>' +
+        '<div class="fitem" style="margin:0 0 12px"><label><b>产品型号</b> <span style="color:var(--red)">*必选</span></label>' +
+        '<select id="nd-model">' + modelOptionsRequired() + '</select></div>' +
         '<div class="frow"><div class="fitem"><label>设备 ID（可选）</label><input id="nd-id" placeholder="留空自动生成，如 A202610310001"></div>' +
         '<div class="fitem"><label>设备名称（可选）</label><input id="nd-name" placeholder="如 厨房主机"></div></div>' +
         '<div class="frow"><div class="fitem"><label>使用者姓名（可选）</label><input id="nd-user" placeholder="如 张阿姨"></div>' +
@@ -539,12 +544,14 @@ function devCard(d) {
 }
 
 async function addDevice() {
+  const model = $('#nd-model').value;
+  if (!model) { alert('请先选择产品型号（必选）'); $('#nd-model').focus(); return; }
   const id = $('#nd-id').value.trim();
   const name = $('#nd-name').value.trim();
   const userName = $('#nd-user').value.trim();
   const userPhone = $('#nd-phone').value.trim();
   const deviceAddr = $('#nd-addr').value.trim();
-  const r = await api('/api/devices', { method: 'POST', body: JSON.stringify({ id: id || undefined, name, userName, userPhone, deviceAddr, note: deviceAddr }) }).catch(() => null);
+  const r = await api('/api/devices', { method: 'POST', body: JSON.stringify({ id: id || undefined, name, userName, userPhone, deviceAddr, note: deviceAddr, model }) }).catch(() => null);
   if (!r || !r.ok) { alert(r && r.error ? r.error : '添加失败：网络连接失败或服务器无响应'); return; }
   $('#add-card').style.display = 'none';
   loadDevices();
@@ -1513,7 +1520,19 @@ function fwSelectOptions() {
 
 /* 手机端检测：移动设备部分功能（WebSerial 烧录等）需电脑端操作 */
 function isMobileDevice() {
-  return /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent || '');
+  const ua = navigator.userAgent || '';
+  // XZLKitchenApp 是本产品安卓壳专属标识：壳内一定算手机，UA 被定制过也不会漏判
+  return /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(ua) || /XZLKitchenApp/i.test(ua);
+}
+
+/** 按平台收掉手机上没有意义的功能（CSS 与 DOM 双保险，不依赖执行时机） */
+function applyPlatformUI() {
+  const mobile = isMobileDevice();
+  document.body.classList.toggle('is-mobile', mobile);
+  if (!mobile) return;
+  document.querySelectorAll('.navbtn[data-view="flash"], .navbtn[data-view="debug"]').forEach((b) => {
+    b.style.display = 'none';
+  });
 }
 
 function fmtSize(n) {
@@ -1581,6 +1600,17 @@ async function loadModels() {
   return modelsCache;
 }
 /** 型号下拉：只有 available 的能选，其余显示「待开发」并禁用 */
+function modelOptionsRequired() {
+  const list = (modelsCache && modelsCache.models) || [
+    { id: 'zilo-wa-v1', name: 'ZILO 无线报警V1', available: true, note: '' },
+    { id: 'zilo-wa-slave-v1', name: 'ZILO 无线报警带从站V1', available: false, note: '待开发' },
+    { id: 'zilo-wired-cut-v1', name: 'ZILO 有线切断V1', available: false, note: '待开发' },
+  ];
+  return '<option value="">请选择产品型号（必选）</option>' + list.map((m) =>
+    '<option value="' + esc(m.id) + '"' + (m.available ? '' : ' disabled') + '>' +
+    esc(m.name) + (m.available ? '' : '（' + esc(m.note || '待开发') + '）') + '</option>').join('');
+}
+
 function modelOptions(selectedId) {
   const list = (modelsCache && modelsCache.models) || [
     { id: 'zilo-wa-v1', name: 'ZILO 无线报警V1', available: true, note: '' },
@@ -2155,7 +2185,7 @@ function changePwdModal(account, isSelf) {
  * 统计口径：只算真实记录 —— 事件流 + 设备上报时间。
  * 固件里还没有真实传感器的字段不进图表，在「数据缺口」里单独列出来，不拿常量冒充数据。
  */
-const insState = { days: 7, data: null, sug: null, charts: {}, lib: null, detailId: null };
+const insState = { model: '', days: 7, data: null, sug: null, charts: {}, lib: null, detailId: null };
 
 function insEcharts() {
   if (window.__insEchartsPromise) return window.__insEchartsPromise;
@@ -2178,7 +2208,8 @@ function insDisposeCharts() {
 }
 
 async function loadInsights(reloadSuggestions) {
-  insState.data = await api('/api/insights/overview?days=' + insState.days).catch(() => null);
+  if (!insState.model) { insState.data = null; return; }   // 没选型号就不统计
+  insState.data = await api('/api/insights/overview?days=' + insState.days + '&model=' + encodeURIComponent(insState.model)).catch(() => null);
   if (reloadSuggestions || !insState.sug) insState.sug = await api('/api/insights/suggestions').catch(() => null);
   insState.lib = await api('/api/insights/library').catch(() => null);
 }
@@ -2188,12 +2219,33 @@ function renderInsightsPage() {
   main.innerHTML =
     '<div class="ins-head"><h2>用户数据库</h2>' +
       '<span>统计口径：设备真实事件流与上报时间，不含未接入的传感器读数</span></div>' +
-    '<div class="ins-seg" id="ins-seg">' +
-      '<button data-d="1">近 24 小时</button><button data-d="7" class="on">近 7 天</button>' +
-      '<button data-d="30">近 30 天</button><button data-d="0">全部</button>' +
+    '<div class="ins-seg" id="ins-modelbar">' +
+      '<label style="font-size:13px;color:#646A73;align-self:center">产品型号：</label>' +
+      '<select id="ins-model" style="padding:7px 12px;border:1px solid #e5e6eb;border-radius:8px;font-size:14px;min-width:210px">' +
+      '<option value="">请先选择产品型号</option>' +
+      '<option value="zilo-wa-v1">ZILO 无线报警V1</option>' +
+      '<option value="zilo-wa-slave-v1">ZILO 无线报警带从站V1</option>' +
+      '<option value="zilo-wired-cut-v1">ZILO 有线切断V1</option>' +
+      '<option value="__none__">未设置型号</option>' +
+      '</select>' +
       '<button id="ins-refresh" style="margin-left:auto">刷新</button>' +
     '</div>' +
-    '<div id="ins-body"><div class="empty">正在汇总…</div></div>';
+    '<div class="ins-seg" id="ins-seg" style="display:none">' +
+      '<button data-d="1">近 24 小时</button><button data-d="7" class="on">近 7 天</button>' +
+      '<button data-d="30">近 30 天</button><button data-d="0">全部</button>' +
+    '</div>' +
+    '<div id="ins-body"><div class="empty" style="padding:60px 0">请先在上方选择产品型号，选择后才会显示该型号的统计数据</div></div>';
+  $('#ins-model').addEventListener('change', (e) => {
+    insState.model = e.target.value;
+    const seg = $('#ins-seg');
+    if (seg) seg.style.display = insState.model ? 'flex' : 'none';
+    if (!insState.model) {
+      insState.data = null;
+      $('#ins-body').innerHTML = '<div class="empty" style="padding:60px 0">请先在上方选择产品型号，选择后才会显示该型号的统计数据</div>';
+      return;
+    }
+    loadInsights(true).then(drawInsights);
+  });
   $('#ins-seg').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -2203,7 +2255,7 @@ function renderInsightsPage() {
     $('#ins-seg').querySelectorAll('button[data-d]').forEach((x) => x.classList.toggle('on', x === b));
     loadInsights(false).then(drawInsights);
   });
-  loadInsights(true).then(drawInsights);
+  if (insState.model) { $('#ins-model').value = insState.model; $('#ins-seg').style.display = 'flex'; loadInsights(true).then(drawInsights); }
 }
 
 function insKpi(label, value, unit, color) {
@@ -2216,8 +2268,9 @@ function drawInsights() {
   const body = $('#ins-body');
   if (!body) return;
   const d = insState.data;
+  if (!insState.model) return;
   if (!d || !d.ok) {
-    body.innerHTML = '<div class="card"><div class="empty">数据加载失败，请点刷新重试</div></div>';
+    body.innerHTML = '<div class="card"><div class="empty">该型号下暂无数据，可换个范围或点刷新重试</div></div>';
     return;
   }
   const t = d.totals;
@@ -2820,7 +2873,12 @@ async function checkUpdate() {
   $('#upbar-text').textContent = '发现新版本 v' + rel.version + '（当前 v' + cur + '）';
   bar.style.display = 'flex';
   $('#upbar-go').onclick = () => {
-    window.open(rel.url, '_blank');        // 站外地址由壳交给系统浏览器下载
+    if (pc) {
+      // EXE 壳：自己下载 + 校验 + 静默安装 + 重启，装完即是最新版
+      window.open('xzl-update://install?url=' + encodeURIComponent(rel.url), '_blank');
+    } else {
+      window.open(rel.url, '_blank');      // 手机端等仍交给系统浏览器下载
+    }
   };
   $('#upbar-later').onclick = () => {
     localStorage.setItem('xz_up_dismiss', rel.version);
@@ -2840,6 +2898,9 @@ async function checkUpdate() {
   };
 }
 
+applyPlatformUI();   // 页面一加载就按平台收按钮，不等登录完成
+window.addEventListener('load', applyPlatformUI);
+
 async function boot() {
   // 免登录校验：本地有令牌且服务端有效 → 直接进入
   const token = localStorage.getItem('xz_token') || '';
@@ -2850,10 +2911,7 @@ async function boot() {
     me = await r.json();
   } catch (e) { /* 服务不可达：继续加载，顶部状态会显示服务离线 */ }
   renderUserBadge();
-  // 手机端（APK 与手机浏览器）没有串口，烧录/有线调试没有意义，直接收起来
-  if (isMobileDevice()) {
-    document.querySelectorAll('.navbtn[data-view="flash"], .navbtn[data-view="debug"]').forEach((b) => { b.style.display = 'none'; });
-  }
+  applyPlatformUI();
   // 并行发起：健康检查 / 设备列表 / 固件库 / 事件预热，互不阻塞，首屏更快
   const [h] = await Promise.all([
     api('/api/health').catch(() => null),

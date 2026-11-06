@@ -84,14 +84,28 @@ function relTime(ts, now) {
  * 生成总览。events 是最多 5000 条的滚动窗口，这一点要在返回值里告诉前端，
  * 否则「7 天趋势」看起来像全量，实际只是窗口内的数据。
  */
-function buildOverview(store, days) {
+function buildOverview(store, days, modelId) {
   const now = Date.now();
-  const events = allEvents(store);
+  const allEventsRaw = allEvents(store);
   const allMode = days === 0;                     // 0 = 全部：从最早一条事件算起
+
+  // 按产品型号分类：__none__ 表示「未设置型号」；不传则不分类（兼容旧调用）
+  const devicesAll = store.getDevices();
+  let devices = devicesAll;
+  if (modelId) {
+    devices = {};
+    Object.keys(devicesAll).forEach((k) => {
+      const d = devicesAll[k];
+      const m = (d.meta && d.meta.model) || '';
+      const hit = modelId === '__none__' ? !m : m === modelId;
+      if (hit) devices[k] = d;
+    });
+  }
+  const deviceIds = Object.keys(devices);
+  const events = modelId ? allEventsRaw.filter((e) => deviceIds.includes(e.device)) : allEventsRaw;
   const earliest = events.reduce((acc, e) => Math.min(acc, e.ts || now), now);
   const span = allMode ? Math.max(DAY, now - earliest) : (days || 7) * DAY;
   const since = allMode ? earliest : now - span;
-  const devices = store.getDevices();
   const windowEvents = events.filter((e) => (e.ts || 0) >= since);
 
   const since24 = now - DAY;
@@ -166,6 +180,7 @@ function buildOverview(store, days) {
     ok: true,
     generatedAt: now,
     windowDays: days || 7,
+    model: modelId || null,
     windowEvents: windowEvents.length,
     eventStoreSize: events.length,
     eventStoreCapped: events.length >= 5000,
