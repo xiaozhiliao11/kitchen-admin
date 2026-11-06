@@ -221,11 +221,12 @@
   .u-new .lr{flex:1;min-width:130px}
   .u-new .lr label{display:block;font-size:12px;color:var(--sub);margin-bottom:4px}
   .u-new .lr input{width:100%;box-sizing:border-box;padding:8px 10px;font-size:14px;border:1px solid #ccd3e0;border-radius:8px}
+  .ver{font-size:12.5px; font-weight:500; color:#8A908D; margin-left:9px; vertical-align:middle; letter-spacing:.02em}
 </style>
 </head>
 <body>
 <header>
-  <h1>小知了厨房卫士后台</h1>
+  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.1</span></h1>
   <nav class="topnav" id="topnav">
     <div class="navbtn on" data-view="devices">全部设备</div>
     <div class="navbtn" data-view="flash">程序烧录</div>
@@ -2011,7 +2012,12 @@ async function boot() {
       (evs.events || []).forEach((e) => { if (!window.__eventsCache[e.device]) window.__eventsCache[e.device] = []; window.__eventsCache[e.device].push(e); });
     })
   ]);
-  if (h) { setPill('srv', true); setPill('mqt', !!h.mqtt); }
+  if (h) {
+    setPill('srv', true); setPill('mqt', !!h.mqtt);
+    // 版本号以服务端为准：一处改版，页面自动跟上
+    const verEl = $('#app-ver');
+    if (verEl && h.version) verEl.textContent = 'v' + h.version;
+  }
   else setPill('srv', false);
   connectWS();
 }

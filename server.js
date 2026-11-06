@@ -148,6 +148,9 @@ function loginFail(account) {
 
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
+// 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
+const APP_VERSION = '1.0.1';
+
 const AUTH_EXEMPT = new Set(['/api/health', '/api/auth/login']);
 app.use('/api', (req, res, next) => {
   const p = (req.originalUrl || req.url || '').split('?')[0];
@@ -998,7 +1001,7 @@ app.post('/api/devices/:id/ai', deviceParam, async (req, res) => {
 
 // 服务健康
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, mqtt: mqttClient && mqttClient.connected, devices: Object.keys(store.getDevices()).length });
+  res.json({ ok: true, version: APP_VERSION, mqtt: mqttClient && mqttClient.connected, devices: Object.keys(store.getDevices()).length });
 });
 
 /* ---------------- MQTT 连接 ---------------- */
