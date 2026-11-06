@@ -35,7 +35,19 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res, filePath) {
+    // 安装包必须带 attachment：否则浏览器/壳会按网页处理，用户拿不到能直接双击的 .exe
+    const base = path.basename(filePath).toLowerCase();
+    if (base.endsWith('.exe') || base.endsWith('.apk')) {
+      const label = base.endsWith('.exe') ? '电脑版.exe' : '安卓版.apk';
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition',
+        'attachment; filename="xzl-kitchen-' + APP_VERSION + (base.endsWith('.exe') ? '-setup.exe' : '.apk') + '"; ' +
+        "filename*=UTF-8''" + encodeURIComponent('小知了厨房卫士-' + APP_VERSION + '-' + label));
+    }
+  },
+}));
 // 前端烧录依赖：esptool-js 浏览器库（WebSerial 真烧录）+ 固件库静态目录
 app.use('/vendor/esptool-js', express.static(path.join(__dirname, 'node_modules', 'esptool-js')));
 // 不再匿名暴露固件目录：固件只能通过 /api/firmwares/:id/download 取（该接口会校验登录或签名链接）
