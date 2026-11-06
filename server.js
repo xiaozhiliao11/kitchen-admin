@@ -1096,7 +1096,8 @@ const APP_RELEASE = {
   },
   android: {
     version: process.env.APP_APK_VERSION || APP_VERSION,
-    url: process.env.APP_APK_URL || '/app/xzl-kitchen.apk',
+    // 必须给绝对外链：相对地址在同域内打开会被壳当网页加载，不会触发下载
+    url: process.env.APP_APK_URL || 'https://aka.doubaocdn.com/s/5GaKgmIyEi',
   },
 };
 app.get('/api/app/version', (req, res) => {
