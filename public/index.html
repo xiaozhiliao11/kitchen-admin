@@ -329,7 +329,7 @@ body.is-mobile .navbtn[data-view="debug"] { display: none !important; }
   <button class="later" id="upbar-later">稍后</button>
 </div>
 <header>
-  <h1>ZILO 管理后台<span class="ver" id="app-ver">v1.0.9</span></h1>
+  <h1>ZILO 管理后台<span class="ver" id="app-ver">v1.1.0</span></h1>
   <nav class="topnav" id="topnav">
     <div class="navbtn on" data-view="devices">全部设备</div>
     <div class="navbtn" data-view="insights">用户数据库</div>
@@ -901,9 +901,11 @@ function otaTab() {
     '<div class="fitem" style="margin-bottom:8px"><label>选择固件库中的固件</label><select id="ota-fw">' +
     (firmwares.length ? firmwares.map((f) => '<option value="' + f.id + '" data-ver="' + esc(f.version) + '">' + esc(f.name) + ' v' + esc(f.version) + '</option>').join('') : '<option value="">（固件库为空，请先上传）</option>') +
     '</select></div>' +
-    '<div class="fitem" style="margin-bottom:8px"><label>固件下载 URL</label><input id="ota-url" placeholder="选择固件后自动填充"></div>' +
-    '<div class="fitem" style="margin-bottom:8px"><label>版本号</label><input id="ota-ver" placeholder="1.3.0"></div>' +
-    '<div style="margin-top:12px"><button class="primary" id="ota-send">下发升级指令</button></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>固件下载 URL（自动生成，无需手填）</label><input id="ota-url" readonly placeholder="进入本页即自动生成"></div>' +
+    '<div class="fitem" style="margin-bottom:8px"><label>版本号（自动带出，可改）</label><input id="ota-ver" placeholder="1.3.0"></div>' +
+    '<div id="ota-link-msg" class="muted" style="font-size:12.5px;margin-bottom:8px"></div>' +
+    '<div style="margin-top:12px"><button class="primary" id="ota-send">下发升级指令</button>' +
+    '<button id="ota-relink" style="margin-left:8px">重新生成链接</button></div>' +
     '<div class="note" style="margin-top:12px">当前固件版本：' + esc(cur.fw || '—') + '。升级后主机会重启并上报新版本号。</div></div>';
 }
 
@@ -1515,16 +1517,94 @@ function renderFlashPage() {
     '<div class="grow"><select id="fl-baud"><option value="921600">波特率 921600（默认）</option><option value="460800">460800（兼容老串口芯片）</option><option value="115200">115200（最稳）</option></select></div>' +
     '<button class="primary" id="fl-connect">连接设备（选串口）</button>' +
     '<button id="fl-burn" disabled>开始烧录</button></div>' +
-    '<div class="logbox" id="fl-log">（操作日志会显示在这里。若上次烧录中断，重新连接后再次烧录即可。）</div></div>';
+    '<div class="logbox" id="fl-log">（操作日志会显示在这里。若上次烧录中断，重新连接后再次烧录即可。）</div></div>' +
+    '<div class="card"><h3>④ OTA 远程升级（不用连 USB）</h3>' +
+    '<p class="muted" style="margin-bottom:10px">选中主机与固件库中的固件：后台会把「签名下载地址 + 版本号」通过 MQTT 下发给主机，主机下载到备用分区、校验通过后切换并重启。主机必须在线，下载链接 30 分钟内有效。</p>' +
+    '<div class="row">' +
+    '<div class="grow"><select id="of-dev">' + devSelectOptions() + '</select></div>' +
+    '<div class="grow"><select id="of-fw">' + fwSelectOptions() + '</select></div>' +
+    '<button class="primary" id="of-send">下发升级指令</button></div>' +
+    '<div class="fitem" style="margin-top:10px"><label>固件下载 URL（自动生成，无需手填）</label><input id="of-url" readonly placeholder="选中固件后自动生成"></div>' +
+    '<div class="fitem" style="margin-top:10px"><label>目标版本号（自动带出，可改）</label><input id="of-ver" placeholder="如 1.3.0"></div>' +
+    '<div id="of-msg" class="muted" style="margin-top:10px"></div></div>';
   $('#fw-up').onclick = uploadFirmware;
   $('#fl-connect').onclick = connectPort;
   $('#fl-burn').onclick = burnFirmware;
+  bindFlashOta();
   loadFirmwares().then(renderFwList);
+}
+
+/* 设备下拉：在线的排前面，方便直接选要升级的主机 */
+function devSelectOptions() {
+  if (!devices.length) return '<option value="">（还没有设备）</option>';
+  return devices.slice().sort((a, b) => ((b.online ? 1 : 0) - (a.online ? 1 : 0)))
+    .map((d) => '<option value="' + esc(d.id) + '">' + esc(d.id) + (d.name ? ' · ' + esc(d.name) : '') +
+      (d.online ? '（在线）' : '（离线）') + '</option>').join('');
+}
+
+/* 程序烧录页的 ④ OTA：进入即自动生成链接，切换固件重新生成，下发前校验 */
+async function bindFlashOta() {
+  const fwSel = $('#of-fw'), urlEl = $('#of-url'), verEl = $('#of-ver'), msg = $('#of-msg');
+  if (!fwSel || !urlEl) return;
+  const fill = async () => {
+    const opt = fwSel.selectedOptions[0];
+    if (!opt || !opt.value) {
+      urlEl.value = '';
+      if (msg) msg.textContent = '固件库为空：请先在 ① 上传固件。';
+      return;
+    }
+    verEl.value = opt.dataset.ver || '';
+    if (msg) msg.textContent = '正在生成下载链接…';
+    const L = await fwLinkFor(opt.value);
+    if (!L) {
+      urlEl.value = '';
+      if (msg) msg.textContent = '链接生成失败（服务未连接或登录失效），请重新选择固件重试。';
+      return;
+    }
+    urlEl.value = L.url;
+    if (msg) {
+      const min = Math.max(1, Math.round((L.expiresAt - Date.now()) / 60000));
+      msg.textContent = '已自动生成下载链接，' + min + ' 分钟内有效（下发时后台会重新签发同期限地址）。';
+    }
+  };
+  fwSel.onchange = fill;
+  const btn = $('#of-send');
+  if (btn) btn.onclick = async () => {
+    const devSel = $('#of-dev');
+    const device = devSel ? devSel.value : '';
+    if (!device) { alert('请先选择要升级的主机'); return; }
+    if (!urlEl.value.trim()) await fill();
+    const url = urlEl.value.trim(), version = verEl.value.trim();
+    if (!url) { alert('下载链接没生成成功，无法下发。请检查固件库与登录状态。'); return; }
+    if (!version) { alert('请填写目标版本号'); return; }
+    const dev = devices.find((x) => x.id === device);
+    if (dev && !dev.online && !confirm('主机 ' + device + ' 当前离线，OTA 指令会下发失败或等到下次上线才执行。仍要下发吗？')) return;
+    btn.disabled = true;
+    const fwId = fwSel.value;
+    const r = await api('/api/devices/' + encodeURIComponent(device) + '/ota', { method: 'POST', body: JSON.stringify({ firmwareId: fwId, version }) }).catch(() => null);
+    btn.disabled = false;
+    if (r && r.ok) {
+      if (msg) msg.textContent = '已下发：' + device + ' → v' + version + (r.warn ? '（' + r.warn + '）' : '');
+      alert(r.warn || ('OTA 指令已下发：' + device + ' → v' + version + '\n主机重启后会自己上报新版本号。'));
+    } else {
+      const err = r && r.error ? r.error : '服务未连接或服务器无响应';
+      if (msg) msg.textContent = '下发失败：' + err;
+      alert('下发失败：' + err);
+    }
+  };
+  if (!devices.length) {
+    const r = await api('/api/devices').catch(() => null);
+    if (r && r.devices) {
+      devices = r.devices;
+      const dsel = $('#of-dev'); if (dsel) dsel.innerHTML = devSelectOptions();
+    }
+  }
+  fill();
 }
 
 function fwSelectOptions() {
   return firmwares.length
-    ? firmwares.map((f) => '<option value="' + f.id + '">' + esc(f.name) + ' v' + esc(f.version) + '（' + fmtSize(f.size) + '）</option>').join('')
+    ? firmwares.map((f) => '<option value="' + f.id + '" data-ver="' + esc(f.version) + '">' + esc(f.name) + ' v' + esc(f.version) + '（' + fmtSize(f.size) + '）</option>').join('')
     : '<option value="">（固件库为空，请先上传）</option>';
 }
 
@@ -1955,21 +2035,57 @@ function bindTabActions(tab) {
   }
   if (tab === 'ota') {
     const fwSel = $('#ota-fw');
-    if (fwSel) fwSel.onchange = async () => {
-      const opt = fwSel.selectedOptions[0];
-      if (opt && opt.value) {
-        $('#ota-ver').value = opt.dataset.ver || '';
-        // 设备端无登录态，OTA 地址用后台签发的 30 分钟临时签名链接
-        const r = await api('/api/firmwares/' + opt.value + '/link').catch(() => null);
-        $('#ota-url').value = (r && r.url) ? location.origin + r.url : '';
-      }
-    };
+    if (fwSel) fwSel.onchange = () => otaFillLink();
+    const relink = $('#ota-relink'); if (relink) relink.onclick = () => otaFillLink(true);
     const b = $('#ota-send'); if (b) b.onclick = async () => {
       const url = $('#ota-url').value.trim(), version = $('#ota-ver').value.trim();
-      if (!url || !version) { alert('请填写固件 URL 和版本号（或在固件库选择）'); return; }
-      const r = await api('/api/devices/' + cur.id + '/ota', { method: 'POST', body: JSON.stringify({ url, version }) }).catch(() => null);
-      alert(r && r.ok ? (r.warn || 'OTA 指令已下发：v' + version) : (r && r.error ? r.error : '下发失败：服务未连接'));
+      if (!url) { await otaFillLink(true); }
+      const u2 = $('#ota-url').value.trim();
+      if (!u2) { alert('下载链接没生成成功，无法下发。请检查后台是否已登录、固件库是否为空。'); return; }
+      if (!version) { alert('请填写版本号'); return; }
+      b.disabled = true;
+      // 传 firmwareId：后台据此自动补签名地址与 sha256（固件强制校验摘要，缺了就下发失败）
+      const r = await api('/api/devices/' + cur.id + '/ota', { method: 'POST', body: JSON.stringify({ firmwareId: fwSel.value, version }) }).catch(() => null);
+      b.disabled = false;
+      alert(r && r.ok ? (r.warn || ('OTA 指令已下发：v' + version + '（sha256 ' + String(r.sha256 || '').slice(0, 8) + '…）')) : (r && r.error ? r.error : '下发失败：服务未连接'));
     };
+    // 只有一个固件时 select 默认已选中，change 不会触发 —— 进页面就必须自动填充
+    otaFillLink();
+  }
+}
+
+/* 取固件签名下载链接（设备端无登录态，必须用带过期签名的地址） */
+async function fwLinkFor(fwId) {
+  if (!fwId) return null;
+  const r = await api('/api/firmwares/' + fwId + '/link').catch(() => null);
+  if (!r || !r.ok || !r.url) return null;
+  return { url: location.origin + r.url, expiresAt: Number(r.expiresAt) || 0 };
+}
+
+/* 自动填充 OTA 表单：URL 由后台签发，版本号从固件库带出 */
+async function otaFillLink(force) {
+  const sel = $('#ota-fw');
+  const urlEl = $('#ota-url'), verEl = $('#ota-ver'), msg = $('#ota-link-msg');
+  if (!sel || !urlEl) return;
+  const opt = sel.selectedOptions[0];
+  if (!opt || !opt.value) {
+    urlEl.value = '';
+    if (msg) msg.textContent = '固件库为空：请先到「程序烧录」页上传固件，再回这里选择。';
+    return;
+  }
+  if (!force && urlEl.value) return;
+  verEl.value = opt.dataset.ver || '';
+  if (msg) msg.textContent = '正在生成下载链接…';
+  const L = await fwLinkFor(opt.value);
+  if (!L) {
+    urlEl.value = '';
+    if (msg) msg.textContent = '链接生成失败（服务未连接或登录已失效），请点「重新生成链接」重试。';
+    return;
+  }
+  urlEl.value = L.url;
+  if (msg) {
+    const min = Math.max(1, Math.round((L.expiresAt - Date.now()) / 60000));
+    msg.textContent = '已自动生成下载链接（' + min + ' 分钟有效）；实际下发时后台会再签发同期限地址给主机下载。';
   }
 }
 

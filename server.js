@@ -25,6 +25,9 @@ const { analyzeDiag, normalizeDiagItems: insightsDiagItems } = require('./diag')
 const { DEFAULT_WORKFLOW, DEFAULT_AI, sanitizeWorkflow, sanitizeAI, runWorkflow } = require('./workflow');
 
 const app = express();
+// 云端部署在反向代理之后：不信任代理头会拿到 http:// 与内部主机名，
+// 而入 OTA 下载地址要发给设备直接抓取，协议/域名错一个设备就下不动。
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 // 统一安全响应头：防点击劫持（ifram 嵌入后台骗管理员点删除）、防 MIME 嗅探、防 Referer 带出地址
 app.use((req, res, next) => {
@@ -184,7 +187,7 @@ function loginFail(account) {
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 // 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
-const APP_VERSION = '1.0.9';
+const APP_VERSION = '1.1.0';
 
 // 上行数据签名密钥：与固件 dev_secret 同值。未设置时进入兼容模式（只记录不拦截），
 // 设置 DEV_SECRET_STRICT=1 后才强制丢弃未签名/签名错误的上报。
@@ -1358,9 +1361,9 @@ app.post('/api/devices/:id/ota', deviceParam, (req, res) => {
     }
   }
   if (!url && body.firmwareId && store.getFirmware(body.firmwareId)) {
-    // 未显式给地址时，用后台签发的临时签名地址（15 分钟有效，够设备下载）
+    // 未显式给地址时，用后台签发的临时签名地址（30 分钟，与前端展示一致）
     const base = process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
-    url = base + signedFwUrl(body.firmwareId, '', 15);
+    url = base + signedFwUrl(body.firmwareId, '', 30);
   }
   if (!url || !version) return res.status(400).json({ error: '缺少 url 或 version' });
   if (!/^https?:\/\/.+/i.test(String(url))) return res.status(400).json({ error: '固件下载地址必须是 http:// 或 https:// 开头' });
