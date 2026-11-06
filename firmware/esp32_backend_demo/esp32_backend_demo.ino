@@ -107,7 +107,7 @@ unsigned long devmodeUntil = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long bootTs = 0;
 bool poweredOff = false; // 软件关机（保留 MQTT 监听，可远程开机）
-String fwVersion = "1.3.1";   // 雷达帧协议修复 + OTA 保活，属行为变更，必须与旧版可区分
+String fwVersion = "1.3.2";   // 雷达帧协议修复 + OTA 保活，属行为变更，必须与旧版可区分
 // 型号标识：后台收到后自动识别设备型号（人工设置过的不被覆盖）
 const char* MODEL_CODE = "ZILO-WA-V1";
 
@@ -1025,13 +1025,9 @@ void readSensors() {
   sen.light = analogRead(PIN_LIGHT);
   sen.batRaw = analogRead(PIN_BAT);
   sen.batV = (float)sen.batRaw / 4095.0f * 3.3f * 2.0f;   // 10k/10k 分压
-  int peak = 0;
-  for (int i = 0; i < 12; i++) {
-    int v = analogRead(PIN_MIC);
-    if (v > peak) peak = v;
-    delay(1);
-  }
-  sen.mic = peak;
+  // 声敏：GPIO20 在 ESP32-C3 上没有 ADC（ADC 只有 GPIO0~5）。
+  // 因此这里按「模块数字输出 DO」读电平：有声=1、无声=0，不再做无效的 analogRead。
+  sen.mic = digitalRead(PIN_MIC) ? 1 : 0;
   sen.shtOk = sht3xRead();
 }
 
@@ -1151,13 +1147,12 @@ void publishDiag() {
     addItem("sht", "err", "T1", "I2C 0x44 无应答");
   }
 
-  // 4 声敏：ESP32-C3 只有 GPIO0~GPIO4(ADC1) 与 GPIO5(ADC2) 具备 ADC，
-  // GPIO20 上 analogRead 恒返回 0 —— 直接报「故障」会变成永久假告警，所以判为 skip 并说明原因
+  // 4 声敏：GPIO20 无 ADC，已改为数字输入(DO)。平时无声=0，属正常静默，不应报故障
   if (sen.mic <= 0) {
-    addItem("mic", "skip", "M1", "当前接在 GPIO20（该脚无 ADC，读数恒 0）：需改用数字输出 DO 接普通 GPIO，或改板到 ADC 脚");
+    addItem("mic", "ok", NULL, "安静（数字输入无声响）");
   } else {
     snprintf(vbuf, sizeof(vbuf), "峰值 %d", sen.mic);
-    addItem("mic", "ok", NULL, vbuf);
+    addItem("mic", "ok", NULL, "检测到声响");
   }
 
   // 5 光敏
