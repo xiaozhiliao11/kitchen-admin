@@ -106,7 +106,9 @@ unsigned long devmodeUntil = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long bootTs = 0;
 bool poweredOff = false; // 软件关机（保留 MQTT 监听，可远程开机）
-String fwVersion = "1.2.1";
+String fwVersion = "1.2.2";
+// 型号标识：后台收到后自动识别设备型号（人工设置过的不被覆盖）
+const char* MODEL_CODE = "ZILO-WA-V1";
 
 /* 时间基准：C3 无 RTC 备份，断电归零。
  * 联网时用 SNTP 校时并记录锚点；离线期间用 millis 差推算；
@@ -247,6 +249,7 @@ void dbgInfoReply() {
   doc["id"] = DEVICE_ID;
   doc["fw"] = fwVersion;
   doc["chip"] = "ESP32-C3";
+  doc["model"] = MODEL_CODE;
   doc["uptimeSec"] = (millis() - bootTs) / 1000;
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["workflowVersion"] = prefs.getString("wf_version", "");
@@ -920,6 +923,7 @@ void publishStatus() {
   doc["state"] = poweredOff ? "off" : "idle";
   doc["battery"] = 97;
   doc["fw"] = fwVersion;
+  doc["model"] = MODEL_CODE;
   doc["devmode"] = devmode;
   JsonObject sensors = doc.createNestedObject("sensors");
   collectSensors(sensors);

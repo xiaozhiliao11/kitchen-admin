@@ -289,7 +289,7 @@ table.ins-table{width:100%;border-collapse:collapse;font-size:13px;table-layout:
   <button class="later" id="upbar-later">稍后</button>
 </div>
 <header>
-  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.4</span></h1>
+  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.5</span></h1>
   <nav class="topnav" id="topnav">
     <div class="navbtn on" data-view="devices">全部设备</div>
     <div class="navbtn" data-view="insights">用户数据库</div>
@@ -400,7 +400,7 @@ function setView(v) {
   view = v;
   document.querySelectorAll('.navbtn').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
   if (v === 'devices') renderHome();
-  else if (v === 'flash') renderFlashPage();
+  else if (v === 'flash') { loadModels().finally(() => renderFlashPage()); }
   else if (v === 'ai') renderAIPage();
   else if (v === 'debug') renderDebugPage();
   else if (v === 'users') renderUsersPage();
@@ -429,7 +429,7 @@ async function loadDevices() {
   // 只提取 devCard 实际展示的字段做比较；globalWfVersion 参与（影响 WF 徽标）
   const key = globalWfVersion + '|' + JSON.stringify(devices.map((d) => [
     d.id, d.name, d.devmode, d.state, d.online, d.lastSyncAt, d.battery, d.fw,
-    d.workflowVersion, d.userName, d.deviceAddr
+    d.workflowVersion, d.userName, d.deviceAddr, d.model, d.modelSrc
   ]));
   if (key !== lastDevicesKey) { lastDevicesKey = key; renderHome(); }
 }
@@ -489,6 +489,11 @@ function devCard(d) {
   return '<div class="dev" data-id="' + d.id + '"' + dim + '>' +
     '<div class="dev-top"><span class="dev-id">' + esc(d.id) + '</span>' +
     '<span class="dev-name">' + esc(d.name || '') + '</span></div>' +
+    '<div class="dev-user"><span class="badge" style="background:' +
+    (d.modelAvailable ? 'var(--blue-l)' : (d.modelName ? 'var(--amber-l)' : 'var(--red-l)')) + ';color:' +
+    (d.modelAvailable ? 'var(--blue)' : (d.modelName ? 'var(--amber)' : 'var(--red)')) + '">' +
+    (d.modelName ? esc(d.modelName) : '未设置型号') +
+    (d.modelSrc === 'device' ? ' ·自动识别' : '') + '</span></div>' +
     ((d.userName || d.deviceAddr) ? '<div class="dev-user">' +
       (d.userName ? '<span>' + esc(d.userName) + '</span>' : '') +
       (d.deviceAddr ? '<span>' + esc(d.deviceAddr) + '</span>' : '') + '</div>' : '') +
@@ -537,6 +542,9 @@ function renderMain() {
   const html =
     '<div class="topbar"><button id="btn-back">← 返回全部设备</button>' +
     '<h2>' + esc(d.id) + (d.name ? ' · ' + esc(d.name) : '') + '</h2>' +
+    (d.modelName
+      ? '<span class="ins-h ' + (d.modelAvailable ? 'good' : 'warn') + '" style="min-width:0">' + esc(d.modelName) + '</span>'
+      : '<span class="ins-h bad" style="min-width:0">未设置型号</span>') +
     '<span class="sync-tag ' + (live ? 'live' : '') + '" data-live="' + (live ? 1 : 0) + '" data-online="' + (online ? 1 : 0) + '" data-ts="' + esc(d.lastSyncAt || '') + '">' +
     (live ? '<span class="dot live"></span>实时（开发者模式）' : syncText(online, d.lastSyncAt)) +
     '</span>' +
@@ -558,6 +566,14 @@ function renderMain() {
         '<div class="fitem"><label>使用者姓名</label><input id="ed-user" value="' + esc(d.userName || '') + '"></div></div>' +
         '<div class="frow"><div class="fitem"><label>联系电话</label><input id="ed-phone" value="' + esc(d.userPhone || '') + '"></div>' +
         '<div class="fitem"><label>设备地址</label><input id="ed-addr" value="' + esc(d.deviceAddr || '') + '"></div></div>' +
+        '<div class="frow"><div class="fitem"><label>设备型号</label>' +
+        '<select id="ed-model">' + modelOptions(d.model) + '</select>' +
+        '<div class="muted" style="font-size:12px;margin-top:4px">' +
+        (d.modelSrc === 'device' ? '当前型号由主机上报自动识别' :
+         (d.model ? '当前型号为人工设置' : '还没有型号，请选择')) +
+        '；带「待开发」的型号暂不可选</div></div>' +
+        '<div class="fitem"><label>MAC 地址</label><div class="muted" style="padding-top:7px;font-size:13px">' +
+        (d.mac ? esc(d.mac) : '—（烧录登记后可见）') + '</div></div></div>' +
         '<div class="row"><button class="primary" id="ed-ok">保存修改</button><button id="ed-cancel">取消</button></div>';
       $('#ed-ok').onclick = async () => {
         const body = {
@@ -566,6 +582,11 @@ function renderMain() {
         };
         const r = await api('/api/devices/' + d.id, { method: 'PATCH', body: JSON.stringify(body) }).catch(() => null);
         if (!r || !r.ok) { alert(r && r.error ? r.error : '保存失败：网络连接失败或服务器无响应'); return; }
+        const sel = $('#ed-model');
+        if (sel && sel.value && sel.value !== d.model) {
+          const mr = await api('/api/devices/' + d.id + '/model', { method: 'POST', body: JSON.stringify({ model: sel.value }) }).catch(() => null);
+          if (!mr || !mr.ok) { alert(mr && mr.error ? mr.error : '型号保存失败'); return; }
+        }
         box.style.display = 'none';
         select(d.id);
       };
@@ -1524,6 +1545,26 @@ function renderFwList() {
 let flashPort = null;
 let flashLoader = null;
 let flashProbe = null; // 预检通过的设备信息
+let modelsCache = null;   // 型号清单（含「待开发」标记）
+/** 拉一次型号清单并缓存；失败不阻塞页面，型号列显示为未知 */
+async function loadModels() {
+  if (modelsCache) return modelsCache;
+  modelsCache = await api('/api/models').catch(() => null);
+  return modelsCache;
+}
+/** 型号下拉：只有 available 的能选，其余显示「待开发」并禁用 */
+function modelOptions(selectedId) {
+  const list = (modelsCache && modelsCache.models) || [
+    { id: 'zilo-wa-v1', name: 'ZILO 无线报警V1', available: true, note: '' },
+    { id: 'zilo-wa-slave-v1', name: 'ZILO 无线报警带从站V1', available: false, note: '待开发' },
+    { id: 'zilo-wired-cut-v1', name: 'ZILO 有线切断V1', available: false, note: '待开发' },
+  ];
+  return list.map((m) =>
+    '<option value="' + esc(m.id) + '"' +
+    (m.id === selectedId ? ' selected' : '') +
+    (m.available ? '' : ' disabled') + '>' +
+    esc(m.name) + (m.available ? '' : '（待开发）') + '</option>').join('');
+}
 const SUPPORTED_USB = {
   '10c4:ea60': 'CP210x 系列（本设计常用，如 CP2102/CP2104）',
   '1a86:7523': 'CH340 系列（常用 USB 转串口）',
@@ -1620,9 +1661,17 @@ async function doConnectPort() {
     flLog('② 正在探测主机固件（DBG 调试协议，115200）…');
     const ok = await probeDbgOnPort(port);
     if (!ok) {
-      flLog('✗ 串口已打开，但未探测到本设计固件（DBG 协议无应答）。');
-      flLog('  可能原因：选错了串口（不是主机）、固件不是本设计（小知了厨房卫士）、或主机处于烧录模式。');
-      flLog('  为保护设备，已拒绝烧录。请确认后重试。');
+      flLog('② DBG 协议无应答 —— 这台很可能是空白主机（焊好但还没烧过固件）。');
+      flLog('   正在做芯片级识别（读芯片型号 + MAC，约需数秒）…');
+      const blank = await detectBlankChip(port);
+      if (blank) {
+        flLog('✓ 已识别到芯片：' + blank.chip + (blank.mac ? (' · MAC ' + blank.mac) : '（MAC 读取失败）'));
+        flLog('   这是未初始化主机：没有固件、也没有设备 ID。下面填写型号后登记，再烧录即可上线。');
+        renderBlankDevice(blank);
+      } else {
+        flLog('✗ 芯片级识别同样失败。可能不是 ESP32 设备、选错了串口，或数据线/驱动有问题。');
+        flLog('  为保护设备，已拒绝进入烧录。请确认后重试。');
+      }
       try { await port.close(); } catch (_) {}
       return;
     }
@@ -1659,6 +1708,86 @@ async function doConnectPort() {
     flLog('✗ 连接失败：' + (msg.indexOf('cancel') >= 0 ? '你取消了选择串口' : msg));
   }
 }
+/**
+ * 芯片级识别：空白主机没固件、DBG 不应答，但 ESP32 的 ROM 引导总会应答 esptool。
+ * 读到芯片型号和 MAC 就能证明「这是一台真实的空白主机」，而不是选错了串口。
+ */
+async function detectBlankChip(port) {
+  let transport = null;
+  try {
+    try { if (port.readable || port.writable) await port.close(); } catch (_) {}
+    await port.open({ baudRate: 115200 });
+    const { ESPLoader, Transport } = await import('/vendor/esptool-js/bundle.js');
+    transport = new Transport(port, true);
+    const loader = new ESPLoader({
+      transport, baudrate: 115200,
+      terminal: { clean() {}, write() {}, onLine() {} }, debug: false
+    });
+    await loader.main('default_reset');
+    let mac = '';
+    try { mac = await loader.readMac(true); } catch (_) { mac = ''; }
+    const chip = loader.chip || '未知芯片';
+    try { await transport.disconnect(); } catch (_) {}
+    return { chip: String(chip), mac: String(mac || '').toUpperCase() };
+  } catch (e) {
+    try { if (transport) await transport.disconnect(); } catch (_) {}
+    return null;
+  }
+}
+
+/** 未初始化主机登记面板：型号只有 V1 可选，其余标「待开发」 */
+function renderBlankDevice(info) {
+  const log = $('#fl-log');
+  if (!log) return;
+  const old = $('#fl-blank');
+  if (old) old.remove();
+  const box = document.createElement('div');
+  box.id = 'fl-blank';
+  box.className = 'card';
+  box.style.marginTop = '10px';
+  box.innerHTML =
+    '<h3 style="margin:0 0 4px;font-size:14px">发现了未初始化主机</h3>' +
+    '<p class="muted" style="margin:0 0 10px;font-size:12.5px">' +
+    '芯片 ' + esc(info.chip) + (info.mac ? (' · MAC ' + esc(info.mac)) : '') +
+    ' · 未探测到固件，也没有设备 ID。先登记它，再烧录固件即可上线。</p>' +
+    '<div class="frow"><div class="fitem"><label>设备型号</label>' +
+    '<select id="bl-model">' + modelOptions('zilo-wa-v1') + '</select></div>' +
+    '<div class="fitem"><label>设备 ID（留空自动分配）</label>' +
+    '<input id="bl-id" placeholder="例如 A001"></div></div>' +
+    '<div class="frow"><div class="fitem"><label>设备名称（可留空）</label>' +
+    '<input id="bl-name" placeholder="例如 一号厨房"></div>' +
+    '<div class="fitem"><label>MAC</label><div class="muted" style="padding-top:7px;font-size:13px">' +
+    (info.mac ? esc(info.mac) : '—') + '</div></div></div>' +
+    '<div class="row"><button class="primary" id="bl-add">登记这台主机</button>' +
+    '<button id="bl-skip">先不登记</button></div>';
+  log.parentNode.insertBefore(box, log.nextSibling);
+  $('#bl-skip').onclick = () => box.remove();
+  $('#bl-add').onclick = async () => {
+    const btn = $('#bl-add');
+    btn.disabled = true;
+    btn.textContent = '登记中…';
+    const body = {
+      id: $('#bl-id').value.trim(),
+      name: $('#bl-name').value.trim() || '新主机',
+      model: $('#bl-model').value,
+      mac: info.mac || '',
+      note: '空白主机登记（' + info.chip + '）',
+    };
+    const r = await api('/api/devices', { method: 'POST', body: JSON.stringify(body) }).catch(() => null);
+    if (!r || !r.ok) {
+      alert(r && r.error ? r.error : '登记失败：网络连接失败或服务器无响应');
+      btn.disabled = false;
+      btn.textContent = '登记这台主机';
+      return;
+    }
+    flLog('✓ 已登记设备：' + r.device.id + ' · ' + (r.device.modelName || '未设型号'));
+    flLog('  下一步：点「开始烧录」写入固件；烧完后在主机配网页把设备 ID 填成 ' + r.device.id + '，它就会用这个身份上线。');
+    box.innerHTML = '<h3 style="margin:0 0 4px;font-size:14px">已登记：' + esc(r.device.id) + '</h3>' +
+      '<p class="muted" style="margin:0;font-size:12.5px">型号 ' + esc(r.device.modelName || '未设置') +
+      ' · 现在可以点下面的「开始烧录」写入固件。</p>';
+  };
+}
+
 async function burnFirmware() {
   const fwId = $('#fl-fw').value;
   if (!fwId) { flLog('✗ 请先在固件库上传/选择一个固件'); return; }

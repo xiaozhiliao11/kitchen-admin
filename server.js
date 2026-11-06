@@ -184,7 +184,7 @@ function loginFail(account) {
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 // 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
-const APP_VERSION = '1.0.4';
+const APP_VERSION = '1.0.5';
 
 // 上行数据签名密钥：与固件 dev_secret 同值。未设置时进入兼容模式（只记录不拦截），
 // 设置 DEV_SECRET_STRICT=1 后才强制丢弃未签名/签名错误的上报。
@@ -454,8 +454,17 @@ function handleStatus(device, msg) {
   const prev = store.getDevice(device);
   const wasOnline = prev ? !!prev.online : false;
 
+  // 型号自动识别：设备自己在 status 里报 model 最可信；固件还没上报就沿用人工设置的
+  const prevMeta = Object.assign({}, (prev && prev.meta) || {});
+  const incomingModel = normalizeModelId(msg.model);
+  if (incomingModel && prevMeta.model !== incomingModel) {
+    prevMeta.model = incomingModel;
+    prevMeta.modelSrc = 'device';
+  }
+
   const rec = store.upsertDevice({
     id: device,
+    meta: prevMeta,
     lastTs: now,
     online: true,
     lastSyncAt: new Date(now).toISOString(),
@@ -702,11 +711,36 @@ app.get('/api/devices', (req, res) => {
       devmode: !!d.devmode,
       devmodeUntil: d.devmodeUntil || 0,
       lastEvent: d.lastEvent,
+      ...modelOf(d.meta),
+      mac: (d.meta && d.meta.mac) || null,
       lastDiagResult: d.lastDiag ? d.lastDiag.result : null,
       lastDiagAt: d.lastDiag ? d.lastDiag.ts : 0
     };
   });
   res.json({ devices: list });
+});
+
+/* 型号清单：前端据此渲染下拉（后两个待开发，disabled） */
+app.get('/api/models', (req, res) => {
+  res.json({ ok: true, models: DEVICE_MODELS, default: DEFAULT_MODEL });
+});
+
+/* 设置某台主机的型号：只接受可用型号，待开发型号一律拒绝 */
+app.post('/api/devices/:id/model', (req, res) => {
+  const id = req.params.id;
+  const dev = store.getDevice(id);
+  if (!dev) return res.status(404).json({ error: '设备不存在' });
+  const want = normalizeModelId(req.body && req.body.model);
+  if (!want) return res.status(400).json({ error: '未知型号，请从型号列表中选择' });
+  const m = DEVICE_MODELS.find((x) => x.id === want);
+  if (!m.available) return res.status(400).json({ error: '型号「' + m.name + '」尚未开发完成，暂不能选择' });
+  const meta = Object.assign({}, dev.meta || {});
+  meta.model = want;
+  meta.modelSrc = 'manual';
+  store.upsertDevice({ id, meta });
+  store.addEvent({ device: id, type: 'params', level: 'info', text: '型号设置为 ' + m.name, ts: Date.now() });
+  broadcast({ type: 'devices_sync' });
+  res.json({ ok: true, model: want, modelName: m.name });
 });
 
 // 单设备详情：状态快照 + 最近事件
@@ -785,6 +819,15 @@ app.post('/api/devices', (req, res) => {
   }
   if (!ID_RE.test(id)) return res.status(400).json({ error: '设备 ID 仅支持字母/数字/下划线/中划线，1~32 位' });
   if (store.getDevice(id)) return res.status(400).json({ error: '设备 ID 已存在：' + id });
+  // 型号：不传则用默认；传了就必须是已开放的型号，待开发的不能写进来
+  let modelToSave = DEFAULT_MODEL;
+  if (req.body && req.body.model) {
+    const want = normalizeModelId(req.body.model);
+    const mi = want ? DEVICE_MODELS.find((x) => x.id === want) : null;
+    if (!mi) return res.status(400).json({ error: '未知型号，请从型号列表中选择' });
+    if (!mi.available) return res.status(400).json({ error: '型号「' + mi.name + '」尚未开发完成，暂不能选择' });
+    modelToSave = want;
+  }
   const rec = store.upsertDevice({
     id,
     meta: {
@@ -792,7 +835,10 @@ app.post('/api/devices', (req, res) => {
       note: (req.body && req.body.note || '手动添加').toString(),
       userName: (req.body && req.body.userName || '').toString().trim(),
       userPhone: (req.body && req.body.userPhone || '').toString().trim(),
-      deviceAddr: (req.body && req.body.deviceAddr || '').toString().trim()
+      deviceAddr: (req.body && req.body.deviceAddr || '').toString().trim(),
+      model: modelToSave,
+      modelSrc: 'manual',
+      mac: (req.body && req.body.mac || '').toString().trim().toUpperCase() || null
     },
     createdAt: Date.now(),
     lastTs: 0,
@@ -800,7 +846,7 @@ app.post('/api/devices', (req, res) => {
   });
   store.addEvent({ device: id, type: 'device', level: 'info', text: '设备已添加（后台注册）', ts: Date.now() });
   broadcast({ type: 'devices_sync' });
-  res.json({ ok: true, device: { id, name: rec.meta.name, note: rec.meta.note, userName: rec.meta.userName, userPhone: rec.meta.userPhone, deviceAddr: rec.meta.deviceAddr, createdAt: rec.createdAt } });
+  res.json({ ok: true, device: { id, name: rec.meta.name, note: rec.meta.note, userName: rec.meta.userName, userPhone: rec.meta.userPhone, deviceAddr: rec.meta.deviceAddr, mac: rec.meta.mac, ...modelOf(rec.meta), createdAt: rec.createdAt } });
 });
 
 // 修改设备信息（名称 / 备注 / 使用者姓名 / 电话 / 地址）
@@ -927,6 +973,38 @@ app.get('/api/insights/suggestions', (req, res) => {
 });
 
 /** 云端调参知识库：每次下发过的调试动作都留档，便于回溯「改了什么、影响了几台」 */
+/* ---------------- 设备型号 ---------------- */
+/* 只有 available:true 的型号能被选；其余在界面上显示「待开发」且后端拒收，
+ * 避免有人绕过前端把设备标成还没做出来的型号。 */
+const DEVICE_MODELS = [
+  { id: 'zilo-wa-v1', code: 'ZILO-WA-V1', name: 'ZILO 无线报警V1', available: true, note: '当前可量产，支持无线报警与联网上报' },
+  { id: 'zilo-wa-slave-v1', code: 'ZILO-WA-SLAVE-V1', name: 'ZILO 无线报警带从站V1', available: false, note: '待开发' },
+  { id: 'zilo-wired-cut-v1', code: 'ZILO-WIRED-CUT-V1', name: 'ZILO 有线切断V1', available: false, note: '待开发' },
+];
+const DEFAULT_MODEL = 'zilo-wa-v1';
+
+/** 设备上报的型号可能是 code / id / 中文名，统一归一成 id；认不出就返回 null（不瞎猜） */
+function normalizeModelId(v) {
+  if (!v) return null;
+  const raw = String(v).trim();
+  if (!raw) return null;
+  const hit = DEVICE_MODELS.find((m) =>
+    raw.toLowerCase() === m.id.toLowerCase() ||
+    raw.toUpperCase() === m.code.toUpperCase() ||
+    raw === m.name);
+  return hit ? hit.id : null;
+}
+function modelOf(meta) {
+  const id = normalizeModelId(meta && meta.model) || '';
+  const m = DEVICE_MODELS.find((x) => x.id === id);
+  return {
+    model: id || null,
+    modelName: m ? m.name : null,
+    modelAvailable: m ? m.available : false,
+    modelSrc: (meta && meta.modelSrc) || (m ? 'manual' : 'unknown'),
+  };
+}
+
 const TUNING_KEY = 'tuningLibrary';
 function tuningLibrary() {
   return Array.isArray(settings[TUNING_KEY]) ? settings[TUNING_KEY] : [];
