@@ -84,6 +84,78 @@ function relTime(ts, now) {
  * 生成总览。events 是最多 5000 条的滚动窗口，这一点要在返回值里告诉前端，
  * 否则「7 天趋势」看起来像全量，实际只是窗口内的数据。
  */
+
+/** 做饭时段聚合：只认真实状态迁移事件（cook 开始/结束 + presence 进出），
+ *  没有这些事件就明确返回空，不用任何推测值填充。 */
+function computeCooking(evts) {
+  const list = evts.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const sessions = [];
+  let open = null, awayStart = 0, awaySec = 0, awayCount = 0;
+
+  for (const e of list) {
+    const t = e.ts || 0;
+    if (e.type === 'cook') {
+      const starting = /开始/.test(e.text || '');
+      if (starting && !open) {
+        open = { startAt: t, awaySec: 0, awayCount: 0 };
+        awayStart = 0; awaySec = 0; awayCount = 0;
+      } else if (!starting && open) {
+        if (awayStart) { open.awaySec += Math.round((t - awayStart) / 1000); awayStart = 0; }
+        open.endAt = t;
+        open.durationSec = Math.round((t - open.startAt) / 1000);
+        sessions.push(open);
+        open = null;
+      }
+    } else if (e.type === 'presence' && open) {
+      const away = /离开/.test(e.text || '');
+      if (away && !awayStart) {
+        awayStart = t;
+        open.awayCount += 1;
+      } else if (!away && awayStart) {
+        open.awaySec += Math.round((t - awayStart) / 1000);
+        awayStart = 0;
+      }
+    }
+  }
+  if (open) {
+    // 还在做饭：时长算到此刻，标注未结束
+    if (awayStart) { open.awaySec += Math.round((Date.now() - awayStart) / 1000); }
+    open.durationSec = Math.round((Date.now() - open.startAt) / 1000);
+    open.ongoing = true;
+    sessions.push(open);
+  }
+  return sessions;
+}
+
+/** 做饭汇总指标 */
+function cookingSummary(evts) {
+  const sessions = computeCooking(evts);
+  const totalSec = sessions.reduce((a, s) => a + (s.durationSec || 0), 0);
+  const awayTotalSec = sessions.reduce((a, s) => a + (s.awaySec || 0), 0);
+  const awayCount = sessions.reduce((a, s) => a + (s.awayCount || 0), 0);
+  const longest = sessions.reduce((a, s) => Math.max(a, s.durationSec || 0), 0);
+  const longestAway = sessions.reduce((a, s) => Math.max(a, s.awaySec || 0), 0);
+  return {
+    cookSessions: sessions.length,
+    cookTotalSec: totalSec,
+    cookAvgSec: sessions.length ? Math.round(totalSec / sessions.length) : 0,
+    cookLongestSec: longest,
+    cookAwayCount: awayCount,
+    cookAwayTotalSec: awayTotalSec,
+    cookAwayLongestSec: longestAway,
+    cookLastAt: sessions.length ? sessions[sessions.length - 1].startAt : 0,
+    cookOngoing: sessions.some((s) => s.ongoing),
+    cookLog: sessions.slice(-15).reverse().map((s) => ({
+      startAt: s.startAt,
+      endAt: s.endAt || 0,
+      durationSec: s.durationSec || 0,
+      awayCount: s.awayCount || 0,
+      awaySec: s.awaySec || 0,
+      ongoing: !!s.ongoing,
+    })),
+  };
+}
+
 function buildOverview(store, days, modelId) {
   const now = Date.now();
   const allEventsRaw = allEvents(store);
@@ -159,6 +231,7 @@ function buildOverview(store, days, modelId) {
       firstEventAt: dev.length ? fmtLocal(Math.min(...dev.map((e) => e.ts))) : '—',
       health: score,
       healthTag: score >= 85 ? 'good' : score >= 60 ? 'warn' : 'bad',
+      cooking: cookingSummary(dev.filter((e) => e.ts >= since)),
     };
   }).sort((a, b) => a.health - b.health);
 
@@ -176,6 +249,7 @@ function buildOverview(store, days, modelId) {
     .slice(0, 5).map((r) => ({ id: r.id, count: r.eventsWindow, activeDays: r.activeDays }));
 
   const online = rows.filter((r) => r.online).length;
+  const cookingAll = cookingSummary(windowEvents);
   return {
     ok: true,
     generatedAt: now,
@@ -201,6 +275,7 @@ function buildOverview(store, days, modelId) {
     alarmByHour,
     alarmTotal,
     ranking,
+    cooking: cookingAll,
     days: dayCount,
     allMode,
     devices: rows,

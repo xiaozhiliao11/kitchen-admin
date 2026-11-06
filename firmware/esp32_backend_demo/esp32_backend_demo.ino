@@ -37,6 +37,7 @@
 #include <Update.h>
 #include <HTTPClient.h>
 #include <WebServer.h>
+#include <Wire.h>
 
 /* ---------------- 配置区 ---------------- */
 /* Wi-Fi：留空 = 只用 NVS 里「首次配网」保存的凭据（推荐）。
@@ -904,14 +905,139 @@ void wifiTick() {
 }
 
 /* 采集传感器数据（接入主固件时替换为真实读取，此处为占位演示） */
+
+/* ================= 传感器真实采集（V46 接线事实） =================
+ * GPIO：MQ=3 / 光敏=1 / 电池分压=0 / 声敏=20 / 雷达 RX=4 TX=5 / SHT3X SDA=6 SCL=7
+ * 所有外设读取都带超时，读不到就标记故障，绝不拖死主循环、也不填假值。 */
+#define PIN_MQ      3
+#define PIN_LIGHT   1
+#define PIN_BAT     0
+#define PIN_MIC     20
+#define RADAR_RX    4
+#define RADAR_TX    5
+#define SHT3X_ADDR  0x44
+
+struct SensorState {
+  bool  radarOk = false;        // 3 秒内是否收到过雷达帧
+  bool  presence = false;
+  int   distCm = 0;
+  unsigned long radarLastMs = 0;
+
+  bool  shtOk = false;
+  float tC = 0, hPct = 0;
+
+  int   mq = 0, light = 0, mic = 0;
+  int   batRaw = 0;
+  float batV = 0;
+
+  bool  cooking = false;
+  unsigned long cookStartMs = 0, lastPresenceMs = 0;
+  float tRef = 0; int mqRef = 0; unsigned long refMs = 0;
+  unsigned long lastReadMs = 0;
+} sen;
+
+/* LD2410C：非阻塞读 UART，只解析「目标状态帧」里的有无人与检测距离 */
+void radarPoll() {
+  static uint8_t w[4] = {0, 0, 0, 0};
+  while (Serial1.available() > 0) {
+    uint8_t b = (uint8_t)Serial1.read();
+    w[0] = w[1]; w[1] = w[2]; w[2] = w[3]; w[3] = b;
+    if (!(w[0] == 0xFD && w[1] == 0xFC && w[2] == 0xFB && w[3] == 0xFA)) continue;
+    unsigned long t0 = millis();
+    while (Serial1.available() < 2 && millis() - t0 < 20UL) delay(1);
+    if (Serial1.available() < 2) return;
+    uint8_t l0 = (uint8_t)Serial1.read(), l1 = (uint8_t)Serial1.read();
+    uint16_t len = (uint16_t)l0 | ((uint16_t)l1 << 8);
+    if (len < 8 || len > 64) continue;                 // 异常帧丢弃，不阻塞
+    while (Serial1.available() < (int)len && millis() - t0 < 40UL) delay(1);
+    if (Serial1.available() < (int)len) return;
+    uint8_t d[64];
+    for (uint16_t i = 0; i < len; i++) d[i] = (uint8_t)Serial1.read();
+    if (d[0] == 0x02) {                                // 目标状态帧
+      sen.presence = (d[2] != 0);
+      sen.distCm   = d[7];
+      sen.radarOk  = true;
+      sen.radarLastMs = millis();
+    }
+  }
+  if (sen.radarLastMs == 0 || millis() - sen.radarLastMs > 3000UL) sen.radarOk = false;
+}
+
+/* SHT3X：I2C 单次测量，失败即返回 false（由自检报 T1） */
+bool sht3xRead() {
+  Wire.beginTransmission(SHT3X_ADDR);
+  Wire.write(0x2C); Wire.write(0x06);                  // 高重复性、无时钟拉伸
+  if (Wire.endTransmission() != 0) return false;
+  delay(20);
+  if (Wire.requestFrom((int)SHT3X_ADDR, 6) != 6) return false;
+  uint8_t b[6];
+  for (int i = 0; i < 6; i++) b[i] = (uint8_t)Wire.read();
+  uint16_t rt = ((uint16_t)b[0] << 8) | b[1];
+  uint16_t rh = ((uint16_t)b[3] << 8) | b[4];
+  sen.tC   = -45.0f + 175.0f * (float)rt / 65535.0f;
+  sen.hPct = 100.0f * (float)rh / 65535.0f;
+  return true;
+}
+
+/* ADC 周期采样（2 秒一次，含 20ms I2C 等待，不会卡主循环） */
+void readSensors() {
+  unsigned long now = millis();
+  if (now - sen.lastReadMs < 2000UL) return;
+  sen.lastReadMs = now;
+  sen.mq    = analogRead(PIN_MQ);
+  sen.light = analogRead(PIN_LIGHT);
+  sen.batRaw = analogRead(PIN_BAT);
+  sen.batV = (float)sen.batRaw / 4095.0f * 3.3f * 2.0f;   // 10k/10k 分压
+  int peak = 0;
+  for (int i = 0; i < 12; i++) {
+    int v = analogRead(PIN_MIC);
+    if (v > peak) peak = v;
+    delay(1);
+  }
+  sen.mic = peak;
+  sen.shtOk = sht3xRead();
+}
+
+/* 做饭判定：有人 + (2 分钟内升温≥1℃ 或 燃气读数波动≥40) → 开始做饭；
+ * 无人持续 90 秒 → 结束做饭。规则保守，宁可晚判也不乱判。 */
+void updateCooking() {
+  unsigned long now = millis();
+  if (sen.presence) {
+    sen.lastPresenceMs = now;
+    if (!sen.cooking) {
+      bool heat = sen.shtOk && sen.tRef > 0 && (sen.tC - sen.tRef) >= 1.0f;
+      bool gas  = sen.mqRef > 0 && (sen.mq > sen.mqRef ? sen.mq - sen.mqRef : sen.mqRef - sen.mq) >= 40;
+      if (heat || gas) { sen.cooking = true; sen.cookStartMs = now; }
+    }
+    if (now - sen.refMs > 120000UL) {
+      sen.tRef = sen.tC; sen.mqRef = sen.mq; sen.refMs = now;
+    }
+  } else if (sen.cooking && sen.lastPresenceMs && now - sen.lastPresenceMs > 90000UL) {
+    sen.cooking = false;
+  }
+}
+
+int batteryPct() {
+  if (sen.batV < 2.5f) return 0;
+  int pct = (int)((sen.batV - 3.30f) / (4.20f - 3.30f) * 100.0f);
+  return constrain(pct, 0, 100);
+}
+
 void collectSensors(JsonObject sensors) {
-  sensors["radar"]["presence"] = false;       // LD2410C：UART 读取后替换
-  sensors["radar"]["dist"] = 0;
-  sensors["mq"] = 180;                        // GPIO3 ADC ×0.75 分压后换算
-  sensors["sht"]["t"] = 26.5;
-  sensors["sht"]["h"] = 58.0;
-  sensors["mic"] = 0;
-  sensors["light"] = 340;
+  JsonObject radar = sensors.createNestedObject("radar");
+  radar["presence"] = sen.presence;
+  radar["dist"] = sen.distCm;
+  radar["ok"] = sen.radarOk;
+  sensors["mq"] = sen.mq;
+  if (sen.shtOk) {
+    JsonObject sht = sensors.createNestedObject("sht");
+    sht["t"] = roundf(sen.tC * 10.0f) / 10.0;
+    sht["h"] = roundf(sen.hPct * 10.0f) / 10.0;
+  }
+  sensors["mic"] = sen.mic;
+  sensors["light"] = sen.light;
+  sensors["batV"] = roundf(sen.batV * 100.0f) / 100.0;
+  sensors["src"] = "real";                    // 明确标识：真实采集，不是占位值
 }
 
 /* 心跳/状态上报 */
@@ -921,7 +1047,7 @@ void publishStatus() {
   doc["ts"] = nowEpoch();
   doc["tsConf"] = timeReady ? "synced" : "unset";
   doc["state"] = poweredOff ? "off" : "idle";
-  doc["battery"] = 97;
+  doc["battery"] = batteryPct();
   doc["fw"] = fwVersion;
   doc["model"] = MODEL_CODE;
   doc["devmode"] = devmode;
@@ -941,33 +1067,88 @@ void publishStatus() {
   doc["workflow_version"] = prefs.getString("wf_version", "");
   doc["volume"] = prefs.getInt("volume", 80);
   signReport(doc, "status");
-  char buf[1900];
+  char buf[2400];   // 留足余量：4 条话术 + 传感器 + 参数后约 1.6KB，旧 1900 遇长话术会被截成非法 JSON
   serializeJson(doc, buf);
   mqtt.publish(topic("status").c_str(), buf);
 }
 
 /* 自检逐项上报（后台「开始自检」触发：全部 8 项真实测试，喇叭播放测试嘟嘟声） */
 void publishDiag() {
-  StaticJsonDocument<1024> doc;
+  StaticJsonDocument<1536> doc;
   doc["id"] = DEVICE_ID;
   doc["ts"] = nowEpoch();
   doc["tsConf"] = timeReady ? "synced" : "unset";
-  doc["seq"] = (unsigned long)esp_random();   // 真随机，避免重启后序号重复
-  JsonArray items = doc.createNestedArray("items");
-  // 每项：name/status/code/value —— 实际接入时读取真实传感器健康状态
-  items.add(serialized("{\"name\":\"radar\",\"status\":\"ok\",\"code\":null,\"value\":\"无人\"}"));
-  items.add(serialized("{\"name\":\"mq\",\"status\":\"ok\",\"code\":null,\"value\":180}"));
-  items.add(serialized("{\"name\":\"sht\",\"status\":\"ok\",\"code\":null,\"value\":\"26.5C/58%\"}"));
-  items.add(serialized("{\"name\":\"mic\",\"status\":\"ok\",\"code\":null,\"value\":0}"));
-  items.add(serialized("{\"name\":\"light\",\"status\":\"ok\",\"code\":null,\"value\":340}"));
-  items.add(serialized("{\"name\":\"battery\",\"status\":\"ok\",\"code\":null,\"value\":\"97%\"}"));
-  // 执行类部件真实动作：LED 依次亮灭 + 喇叭播放测试嘟嘟声
-  Serial.println("[TEST] LED 自检：红→绿→蓝→灭（WS2812 @ GPIO8）");
-  items.add(serialized("{\"name\":\"led\",\"status\":\"ok\",\"code\":null,\"value\":\"红→绿→蓝→灭\"}"));
-  Serial.println("[TEST] 喇叭自检：播放测试嘟嘟声 1kHz×3（MAX98357A I2S 输出，请留意声音）");
-  items.add(serialized("{\"name\":\"speaker\",\"status\":\"ok\",\"code\":null,\"value\":\"嘟嘟声 1kHz×3\"}"));
+  doc["seq"] = (unsigned long)esp_random();
+  JsonArray items = doc.createNestedArray("items");   // 对象数组（不是字符串数组）
+
+  auto addItem = [&](const char* name, const char* status, const char* code, const char* value) {
+    JsonObject it = items.createNestedObject();
+    it["name"] = name;
+    it["status"] = status;
+    if (code && code[0]) it["code"] = code; else it["code"] = nullptr;
+    it["value"] = value;
+  };
+  char vbuf[56];
+
+  // 1 雷达（UART 是否在出帧）
+  if (sen.radarOk) {
+    snprintf(vbuf, sizeof(vbuf), "%s / %dcm", sen.presence ? "有人" : "无人", sen.distCm);
+    addItem("radar", "ok", NULL, vbuf);
+  } else {
+    addItem("radar", "err", "R1", "3 秒内未收到雷达 UART 帧");
+  }
+
+  // 2 燃气 MQ（满量程=开路）
+  if (sen.mq >= 4000) {
+    addItem("mq", "err", "G1", "ADC 满量程，信号疑似开路");
+  } else {
+    snprintf(vbuf, sizeof(vbuf), "ADC %d", sen.mq);
+    addItem("mq", "ok", NULL, vbuf);
+  }
+
+  // 3 温湿度 SHT3X
+  if (sen.shtOk) {
+    snprintf(vbuf, sizeof(vbuf), "%.1fC / %.0f%%", sen.tC, sen.hPct);
+    addItem("sht", "ok", NULL, vbuf);
+  } else {
+    addItem("sht", "err", "T1", "I2C 0x44 无应答");
+  }
+
+  // 4 声敏
+  if (sen.mic <= 0) {
+    addItem("mic", "warn", "M1", "读数为 0（环境安静或接线/电位器异常）");
+  } else {
+    snprintf(vbuf, sizeof(vbuf), "峰值 %d", sen.mic);
+    addItem("mic", "ok", NULL, vbuf);
+  }
+
+  // 5 光敏
+  if (sen.light <= 2 || sen.light >= 4093) {
+    addItem("light", "err", "L1", "读数恒为两端值，疑似分压断线");
+  } else {
+    snprintf(vbuf, sizeof(vbuf), "ADC %d", sen.light);
+    addItem("light", "ok", NULL, vbuf);
+  }
+
+  // 6 电池
+  if (sen.batV < 2.5f || sen.batV > 4.35f) {
+    snprintf(vbuf, sizeof(vbuf), "%.2fV 超出合理区间", sen.batV);
+    addItem("battery", "err", "B2", vbuf);
+  } else if (sen.batV < 3.4f) {
+    snprintf(vbuf, sizeof(vbuf), "%.2fV", sen.batV);
+    addItem("battery", "err", "B1", vbuf);
+  } else {
+    snprintf(vbuf, sizeof(vbuf), "%.2fV / %d%%", sen.batV, batteryPct());
+    addItem("battery", "ok", NULL, vbuf);
+  }
+
+  // 7/8 执行类部件：尚未接入自动检测，如实标注 skip，不冒充正常
+  addItem("led", "skip", NULL, "未接入自动检测，需目视确认");
+  addItem("speaker", "skip", NULL, "未接入自动检测，需听声确认");
+  Serial.println("[TEST] 自检采集完成：雷达/MQ/SHT/声敏/光敏/电池均为实读数");
+
   signReport(doc, "diag");
-  char buf[1400];
+  char buf[1600];
   serializeJson(doc, buf);
   mqtt.publish(topic("diag").c_str(), buf);
 }
@@ -1080,9 +1261,10 @@ void publishSnap() {
   doc["seq"] = (unsigned long)esp_random();
   JsonObject sensors = doc.createNestedObject("sensors");
   collectSensors(sensors);
-  doc["personPresent"] = false;
-  doc["cooking"] = false;
-  doc["sinceCookStartSec"] = 0;
+  doc["personPresent"] = sen.presence;
+  doc["cooking"] = sen.cooking;
+  doc["sinceCookStartSec"] = sen.cooking ? (unsigned long)((millis() - sen.cookStartMs) / 1000UL) : 0;
+  doc["cookingSource"] = "radar+temp+gas";    // 判定依据，后台可追溯
   signReport(doc, "snap");
   char buf[640];
   serializeJson(doc, buf);
@@ -1244,6 +1426,15 @@ void connectMqtt() {
 
 void setup() {
   Serial.begin(115200);
+  /* 传感器硬件初始化：所有读取都在后面按周期做，不在这里等 */
+  Wire.begin(6, 7);                                  // SHT3X：SDA=GPIO6 / SCL=GPIO7
+  Wire.setClock(100000);
+  analogReadResolution(12);
+  analogSetPinAttenuation(PIN_MQ, ADC_11db);
+  analogSetPinAttenuation(PIN_LIGHT, ADC_11db);
+  analogSetPinAttenuation(PIN_BAT, ADC_11db);
+  analogSetPinAttenuation(PIN_MIC, ADC_11db);
+  Serial1.begin(256000, SERIAL_8N1, RADAR_RX, RADAR_TX);   // LD2410C 默认 256000
   prefs.begin("kitchen", false);
 
   /* 1. 先定身份：后续所有 topic 都依赖它 */
@@ -1306,6 +1497,9 @@ void loop() {
   esp_task_wdt_reset();     // 喂狗：能跑到这里说明主循环还活着
 
   pollSerialDbg();          // 有线调试：处理 USB 串口指令
+  radarPoll();              // 雷达帧解析（非阻塞）
+  readSensors();            // ADC / SHT3X 周期采样（2 秒）
+  updateCooking();          // 做饭状态判定
   provServer.handleClient();// 配网页（热点模式；按键触发后同样可用）
   pollProvisionButton();    // 按键长按 3s → 重新进入配网
   if (provisioning && millis() >= provisionUntil) {

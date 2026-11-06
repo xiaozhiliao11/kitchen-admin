@@ -21,7 +21,7 @@ const { WebSocketServer } = require('ws');
 const config = require('./config');
 const store = require('./store');
 const insights = require('./insights');
-const { analyzeDiag } = require('./diag');
+const { analyzeDiag, normalizeDiagItems: insightsDiagItems } = require('./diag');
 const { DEFAULT_WORKFLOW, DEFAULT_AI, sanitizeWorkflow, sanitizeAI, runWorkflow } = require('./workflow');
 
 const app = express();
@@ -184,7 +184,7 @@ function loginFail(account) {
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 // 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
-const APP_VERSION = '1.0.8';
+const APP_VERSION = '1.0.9';
 
 // 上行数据签名密钥：与固件 dev_secret 同值。未设置时进入兼容模式（只记录不拦截），
 // 设置 DEV_SECRET_STRICT=1 后才强制丢弃未签名/签名错误的上报。
@@ -523,8 +523,10 @@ function handleDiag(device, msg) {
     enhanceWithAI(device, analysis).catch(() => {});
   }
   // 自检时间以服务端为准（原因同上：真机固件 ts 为运行毫秒数）
-  store.upsertDevice({ id: device, lastDiag: { ts: Date.now(), seq: msg.seq, items: msg.items || [], ...analysis } });
-  broadcast({ type: 'diag', device, data: { seq: msg.seq, items: msg.items || [], ...analysis } });
+  // 存归一化后的对象数组：前端直接读 name/status/code，不用再解一次字符串
+  const items = insightsDiagItems(msg.items);
+  store.upsertDevice({ id: device, lastDiag: { ts: Date.now(), seq: msg.seq, items, ...analysis } });
+  broadcast({ type: 'diag', device, data: { seq: msg.seq, items, ...analysis } });
 }
 
 /** 心跳超时离线扫描（每 5 秒；固件常态心跳 60 秒） */
@@ -660,6 +662,27 @@ function handleSnap(device, msg) {
     cooking: !!msg.cooking,
     sinceCookStartSec: Number(msg.sinceCookStartSec || 0)
   };
+
+  // 状态迁移落事件：只有「变化」才写，避免 20 秒一条的快照把事件流灌满。
+  // 用户数据库的做饭时段/时长/离厨统计全靠这四个迁移点，没有它算不出任何真实数据。
+  const prevSnap = (store.getDevice(device) || {}).lastSnapCtx;
+  const nowTs = Date.now();
+  if (prevSnap) {
+    if (!!prevSnap.personPresent !== ctx.personPresent) {
+      store.addEvent({
+        device, type: 'presence', level: 'info',
+        text: ctx.personPresent ? '有人进入厨房' : '离开厨房', ts: nowTs
+      });
+    }
+    if (!!prevSnap.cooking !== ctx.cooking) {
+      store.addEvent({
+        device, type: 'cook', level: 'info',
+        text: ctx.cooking ? '开始做饭' : '结束做饭', ts: nowTs
+      });
+    }
+  }
+  store.upsertDevice({ id: device, lastSnapCtx: { personPresent: ctx.personPresent, cooking: ctx.cooking, at: nowTs } });
+
   callSceneAI(device, sensors, ctx).then((result) => {
     const payload = { id: device, ts: Date.now(), seq: msg.seq || 0, ...result };
     mqttClient.publish(PREFIX + device + '/ai', JSON.stringify(payload), { qos: 1 });
@@ -1118,9 +1141,45 @@ app.post('/api/tests', (req, res) => {
     status: 'running',
     items: [],
   };
+  // 真联动：测试期间把主机切到开发者模式（5 秒一次高频上报），前端才能取到实时读数
+  let linkWarn = '';
+  if (d.online) {
+    publishCmd(device, { cmd: 'devmode', on: true, ttl: 3600 });
+    store.upsertDevice({ id: device, devmode: true, devmodeUntil: Date.now() + 3600 * 1000 });
+    rec.linked = true;
+    rec.linkedAt = Date.now();
+  } else {
+    rec.linked = false;
+    linkWarn = '主机当前离线，已开始记录，但拿不到实时读数；主机联网后自动恢复联动';
+  }
   settings[TEST_KEY] = [rec].concat(wirelessTests()).slice(0, 100);
   store.saveSettings(settings);
-  res.json({ ok: true, test: rec, items: TEST_ITEMS });
+  res.json({ ok: true, test: rec, items: TEST_ITEMS, linked: rec.linked, warn: linkWarn || offlineWarn(device) });
+});
+
+/** 测试联动：拉取被测主机当前实时读数（前端 2 秒轮询，数值来自主机真实上报） */
+app.get('/api/tests/:id/live', (req, res) => {
+  const t = wirelessTests().find((x) => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: '测试记录不存在' });
+  const d = store.getDevice(t.device);
+  if (!d) return res.json({ ok: true, online: false, reason: '设备已删除，联动中断' });
+  const now = Date.now();
+  const lastTs = Number(d.lastTs) || 0;
+  const ageSec = lastTs ? Math.round((now - lastTs) / 1000) : null;
+  const snap = d.snapshot || {};
+  res.json({
+    ok: true,
+    device: t.device,
+    deviceName: (d.meta && d.meta.name) || '',
+    online: !!d.online && ageSec != null && ageSec <= Math.round(config.offlineAfterMs / 1000),
+    ageSec,
+    devmode: !!d.devmode,
+    sensors: snap.sensors || {},
+    battery: snap.battery != null ? snap.battery : (d.battery != null ? d.battery : null),
+    state: snap.state || d.state || 'unknown',
+    fw: snap.fw || d.fw || '',
+    ts: lastTs
+  });
 });
 
 /** 追加一条验证记录 */
@@ -1148,6 +1207,12 @@ app.post('/api/tests/:id/finish', (req, res) => {
   if (!t) return res.status(404).json({ error: '测试记录不存在' });
   t.status = 'done';
   t.finishedAt = Date.now();
+  // 测试结束，主机退出开发者模式，回常态省电心跳
+  const d = store.getDevice(t.device);
+  if (d && d.devmode) {
+    publishCmd(t.device, { cmd: 'devmode', on: false });
+    store.upsertDevice({ id: t.device, devmode: false, devmodeUntil: 0 });
+  }
   store.saveSettings(settings);
   res.json({ ok: true, test: t, advice: testAdvice(t.items) });
 });
@@ -1162,8 +1227,16 @@ app.get('/api/tests/:id', (req, res) => {
 /** 删除一场（谨慎操作，需显式确认参数） */
 app.delete('/api/tests/:id', (req, res) => {
   if (String(req.query.confirm || '') !== '1') return res.status(400).json({ error: '需要 confirm=1 才删除' });
+  const t = wirelessTests().find((x) => x.id === req.params.id);
   settings[TEST_KEY] = wirelessTests().filter((x) => x.id !== req.params.id);
   store.saveSettings(settings);
+  if (t && t.status === 'running') {
+    const d = store.getDevice(t.device);
+    if (d && d.devmode) {
+      publishCmd(t.device, { cmd: 'devmode', on: false });
+      store.upsertDevice({ id: t.device, devmode: false, devmodeUntil: 0 });
+    }
+  }
   res.json({ ok: true });
 });
 

@@ -65,8 +65,25 @@ const FAULT_CODES = {
  * @param items [{name, status:'ok|warn|err', code, value, detail}]
  * @returns { result:'pass|fail', total, problems:[{name,code,status,reason,causes,advice}] }
  */
+/** 固件把每一项序列化成字符串塞进数组（items: ['{"name":...}', ...]），
+ *  老代码直接按对象读字段，导致 problems 永远为空、自检永远判 pass。
+ *  这里统一归一化：字符串解析成对象，解不出来的按异常处理（宁可报错也不能静默通过）。 */
+function normalizeDiagItems(items) {
+  return (items || []).map((i) => {
+    if (i && typeof i === 'object') return i;
+    if (typeof i === 'string') {
+      try {
+        const o = JSON.parse(i);
+        if (o && typeof o === 'object') return o;
+      } catch (e) { /* 落到下面 */ }
+      return { name: 'unknown', status: 'err', code: 'UNKNOWN', value: String(i).slice(0, 40) };
+    }
+    return { name: 'unknown', status: 'err', code: 'UNKNOWN', value: String(i) };
+  });
+}
+
 function analyzeDiag(items) {
-  const list = items || [];
+  const list = normalizeDiagItems(items);
   const problems = list.filter((i) => i.status === 'err' || i.status === 'warn');
   const analyzed = problems.map((i) => {
     const rule = FAULT_CODES[i.code];
@@ -100,4 +117,4 @@ function analyzeDiag(items) {
   };
 }
 
-module.exports = { FAULT_CODES, analyzeDiag };
+module.exports = { FAULT_CODES, analyzeDiag, normalizeDiagItems };

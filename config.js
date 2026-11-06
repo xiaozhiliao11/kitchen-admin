@@ -48,7 +48,7 @@ module.exports = {
 
   // 设备心跳：常态 60 秒一次（固件 NORMAL_INTERVAL_MS）。判离线只留 15 秒余量，
   // 太宽会让 UI 在设备已断电后仍长时间显示「在线」（状态不真实）
-  offlineAfterMs: Number(process.env.OFFLINE_AFTER_MS || 75000),
+  offlineAfterMs: Number(process.env.OFFLINE_AFTER_MS || 100000),
 
   // 开发者模式默认时长（秒），超时自动关闭并通知主机恢复低功耗
   devmodeDefaultTtlSec: Number(process.env.DEVMODE_TTL_SEC || 1800),
