@@ -4,3 +4,6 @@ logs/
 data/*.json
 data/.gitkeep
 .env
+
+# 固件库：bin 随仓库分发，索引由启动自愈重建
+firmware-store/meta.json

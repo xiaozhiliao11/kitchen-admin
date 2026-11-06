@@ -102,6 +102,41 @@ function loginFail(account) {
   console.log('[认证] 已初始化管理员账号 ' + ROOT_ADMIN);
 })();
 
+// 固件库自愈：部署可能重置容器，firmwareDir 里的 .bin 与 meta.json 需对齐。
+// 按文件名规则 {id}_{name}_v{version}.bin 重建缺失索引，剔除已不存在的文件记录。
+(function rebuildFirmwareIndex() {
+  try {
+    if (!fs.existsSync(config.firmwareDir)) fs.mkdirSync(config.firmwareDir, { recursive: true });
+    const disks = fs.readdirSync(config.firmwareDir).filter((f) => f.endsWith('.bin'));
+    const old = store.getFirmwares();
+    const meta = old.filter((fw) => fw.fileName && fs.existsSync(path.join(config.firmwareDir, fw.fileName)));
+    const known = new Set(meta.map((fw) => fw.fileName));
+    let added = 0;
+    for (const f of disks) {
+      if (known.has(f)) continue;
+      const m = f.match(/^([0-9a-f]{8})_(.+)_v([\w.\-]+)\.bin$/);
+      if (!m) continue;
+      const p = path.join(config.firmwareDir, f);
+      const st = fs.statSync(p);
+      meta.push({
+        id: m[1],
+        name: m[2],
+        version: m[3],
+        note: '启动时自动重建索引',
+        size: st.size,
+        sha256: crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'),
+        fileName: f,
+        uploadedAt: Math.round(st.mtimeMs)
+      });
+      added++;
+    }
+    if (added > 0 || meta.length !== old.length) {
+      store.saveFirmwares(meta);
+      console.log('[固件库] 索引已同步：' + meta.length + ' 个固件（新增 ' + added + '）');
+    }
+  } catch (e) { console.error('[固件库] 自愈失败：' + e.message); }
+})();
+
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 const AUTH_EXEMPT = new Set(['/api/health', '/api/auth/login']);
