@@ -329,7 +329,7 @@ body.is-mobile .navbtn[data-view="debug"] { display: none !important; }
   <button class="later" id="upbar-later">稍后</button>
 </div>
 <header>
-  <h1>ZILO 管理后台<span class="ver" id="app-ver">v1.1.1</span></h1>
+  <h1>ZILO 管理后台<span class="ver" id="app-ver">v1.1.2</span></h1>
   <nav class="topnav" id="topnav">
     <div class="navbtn on" data-view="devices">全部设备</div>
     <div class="navbtn" data-view="insights">用户数据库</div>
@@ -409,7 +409,7 @@ setInterval(updateSyncTexts, 5000);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const sensorName = (k) => ({ radar: '雷达', mq: '燃气', sht: '温湿度', mic: '声敏', light: '光敏', battery: '电池', led: 'LED 灯', speaker: '喇叭' }[k] || k);
 const stShort = (s) => ({ ok: '正常', err: '故障', warn: '异常', pass: '通过' }[s] || s);
-const stText = (s) => ({ idle: '运行', run: '监测中', alert: '提醒', low_battery: '低电', unknown: '未知', offline: '离线', off: '已关机' }[s] || s);
+const stText = (s) => ({ idle: '运行', run: '监测中', alert: '提醒', low_battery: '低电', ota: '升级中', unknown: '未知', offline: '离线', off: '已关机' }[s] || s);
 const LV_CN = { info: '信息', warn: '提醒', err: '故障', critical: '严重', diag: '自检', ota: '升级', wifi: '网络', system: '系统', vol: '音量' };
 const TYPE_CN = { gas_leak: '燃气泄漏', forgot_stove: '忘关火', low_battery: '低电', test_ok: '自检通过', self_test: '自检', power: '电源', boot: '开机', reboot: '重启', device: '设备', workflow: '工作流', vol: '音量' };
 const ALL_SENSORS = [
@@ -580,6 +580,24 @@ async function select(id) {
 
 function backToHome() { selId = null; cur = null; setView('devices'); }
 
+/* 最近一次指令回执 / 升级中提示：设备回了 ack 必须有地方看得见，
+   否则"后台显示下发成功、设备实际没执行"对用户就是黑箱 */
+function ackLine(d) {
+  if (d.otaGraceUntil && d.otaGraceUntil > Date.now()) {
+    const left = Math.round((d.otaGraceUntil - Date.now()) / 1000);
+    return '<div style="margin:8px 0;padding:8px 12px;border-radius:8px;background:#eef4ff;border:1px solid #c3d7f7;color:#1b4d8f;font-size:13px">' +
+      '正在升级固件' + (d.otaTargetVersion ? ' → v' + esc(d.otaTargetVersion) : '') + '，主机重启期间不显示离线（剩余 ' + left + ' 秒宽限）</div>';
+  }
+  const a = d.lastAck;
+  if (!a) return '';
+  const when = a.at ? new Date(a.at).toLocaleTimeString('zh-CN', { hour12: false }) : '';
+  return '<div style="margin:8px 0;padding:8px 12px;border-radius:8px;font-size:13px;background:' +
+    (a.ok ? '#eefaf0' : '#fdecea') + ';border:1px solid ' + (a.ok ? '#b7e1c0' : '#f3b4b0') + ';color:' +
+    (a.ok ? '#1a6b33' : '#8a1c14') + '">上次指令 <b>' + esc(a.cmd) + '</b> ' +
+    (a.ok ? '执行成功' : '执行失败') + (a.detail ? '：' + esc(a.detail) : '') +
+    (when ? '（' + when + '）' : '') + '</div>';
+}
+
 function renderMain() {
   const d = cur;
   const live = d.devmode;
@@ -595,6 +613,7 @@ function renderMain() {
     '</span>' +
     '<button id="btn-edit">编辑信息</button>' +
     '<button class="danger" id="btn-del">删除设备</button></div>' +
+    ackLine(d) +
     '<div class="card" id="edit-card" style="display:none"></div>' +
     (live ? devmodeBar(true) : devmodeBar(false)) +
     tabBar() +

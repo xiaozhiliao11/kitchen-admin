@@ -187,7 +187,7 @@ function loginFail(account) {
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 // 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
-const APP_VERSION = '1.1.1';
+const APP_VERSION = '1.1.2';
 
 // 上行数据签名密钥：与固件 dev_secret 同值。未设置时进入兼容模式（只记录不拦截），
 // 设置 DEV_SECRET_STRICT=1 后才强制丢弃未签名/签名错误的上报。
@@ -479,8 +479,14 @@ function handleStatus(device, msg) {
     workflowVersion: msg.workflow_version != null ? msg.workflow_version : (prev && prev.workflowVersion),
     sensorHealth: msg.sensors || (prev && prev.sensorHealth) || {},
     lastEvent: msg.last_event || (prev && prev.lastEvent) || null,
-    devmode: prev && prev.devmode ? true : false,
-    devmodeUntil: prev && prev.devmodeUntil ? prev.devmodeUntil : 0
+    // 开发者模式必须以「设备自己上报的 devmode」为准：
+    // 固件 TTL 到期会自行关闭并上报 devmode=false，只看本地记录会让后台永远显示"开启中"（状态与实物脱钩）
+    devmode: (typeof msg.devmode === 'boolean')
+      ? msg.devmode
+      : (prev && prev.devmode ? true : false),
+    devmodeUntil: (msg.devmode === false)
+      ? 0
+      : (prev && prev.devmodeUntil ? prev.devmodeUntil : 0)
   });
 
   // 全局推送闭环：设备上报的工作流版本落后于全局版本（离线期间错过推送）→ 自动补发
@@ -541,6 +547,12 @@ setInterval(() => {
     const d = map[id];
     // lastTs 缺失（老数据/异常记录）时按 0 处理，否则 now-NaN 比较恒为 false → 永不判离线
     const lastTs = Number(d.lastTs) || 0;
+    // OTA 下载/重启期间固件无心跳（1.1MB 慢网可超过离线阈值），宽限期内不判离线
+    const grace = Number(d.otaGraceUntil) || 0;
+    if (grace) {
+      if (now < grace) continue;              // 宽限进行中：保持在线态
+      store.upsertDevice({ id, otaGraceUntil: 0 });  // 宽限已过：清掉标记，恢复正常判定
+    }
     if (d.online && now - lastTs > config.offlineAfterMs) {
       store.upsertDevice({ id, online: false });
       store.addEvent({ device: id, type: 'device', level: 'warn', text: '设备离线（心跳超时）', ts: now });
@@ -797,7 +809,11 @@ app.get('/api/devices/:id', deviceParam, (req, res) => {
       devmode: !!d.devmode,
       devmodeUntil: d.devmodeUntil || 0,
       lastEvent: d.lastEvent,
-      lastDiag: d.lastDiag || null
+      lastDiag: d.lastDiag || null,
+      otaGraceUntil: d.otaGraceUntil || 0,
+      otaStartedAt: d.otaStartedAt || 0,
+      otaTargetVersion: d.otaTargetVersion || null,
+      lastAck: d.lastAck || null
     },
     events: store.listEvents(req.deviceId, 30)
   });
@@ -1370,6 +1386,11 @@ app.post('/api/devices/:id/ota', deviceParam, (req, res) => {
   if (!sha256 || !/^[0-9a-f]{64}$/i.test(String(sha256))) return res.status(400).json({ error: '缺少有效 sha256（64 位十六进制），真 OTA 必须校验固件摘要' });
   const finalSha = String(sha256).toLowerCase();
   publishCmd(req.deviceId, { cmd: 'ota', url: String(url), version: String(version).slice(0, 24), sha256: finalSha });
+  // 下载 + 校验 + 重启期间固件不会发心跳，给 180 秒宽限，避免后台把「正在升级」误判成「设备离线」
+  const devNow = store.getDevice(req.deviceId);
+  if (devNow && devNow.online) {
+    store.upsertDevice({ id: req.deviceId, otaGraceUntil: Date.now() + 180000, otaStartedAt: Date.now(), otaTargetVersion: version });
+  }
   store.addEvent({ device: req.deviceId, type: 'ota', level: 'info', text: `下发 OTA：v${String(version).slice(0, 24)}（sha256=${finalSha.slice(0, 8)}…）`, ts: Date.now() });
   res.json({ ok: true, url: String(url), version: String(version).slice(0, 24), sha256: finalSha, warn: offlineWarn(req.deviceId) });
 });

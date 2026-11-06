@@ -107,7 +107,7 @@ unsigned long devmodeUntil = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long bootTs = 0;
 bool poweredOff = false; // 软件关机（保留 MQTT 监听，可远程开机）
-String fwVersion = "1.2.2";
+String fwVersion = "1.3.0";   // 雷达帧协议修复 + OTA 保活，属行为变更，必须与旧版可区分
 // 型号标识：后台收到后自动识别设备型号（人工设置过的不被覆盖）
 const char* MODEL_CODE = "ZILO-WA-V1";
 
@@ -307,7 +307,7 @@ void dbgStatusReply() {
 void dbgEventReply(int n) {
   if (n <= 0) n = 10;
   if (n > DBG_EVENT_BUF) n = DBG_EVENT_BUF;
-  StaticJsonDocument<1600> doc;
+  StaticJsonDocument<3000> doc;      // 8 条事件 + 中文话术最坏 2656B，原 1600 会溢出
   doc["dbg"] = "event";
   doc["ok"] = true;
   JsonArray arr = doc.createNestedArray("events");
@@ -320,7 +320,7 @@ void dbgEventReply(int n) {
     e["text"] = dbgEvents[idx].text;
     e["ts"] = dbgEvents[idx].ts;
   }
-  char buf[1700];
+  char buf[3100];
   serializeJson(doc, buf);
   Serial.println(buf);
 }
@@ -936,26 +936,45 @@ struct SensorState {
   unsigned long lastReadMs = 0;
 } sen;
 
-/* LD2410C：非阻塞读 UART，只解析「目标状态帧」里的有无人与检测距离 */
+/* LD2410C：非阻塞读 UART，解析「目标数据帧」里的有无人与距离。
+ *
+ * 协议要点（这里踩过一次坑，务必保持）：
+ *   - 目标数据帧（雷达每 50~200ms 主动上报）帧头 = F4 F3 F2 F1，帧尾 = F8 F7 F6 F5
+ *   - 控制帧（后台发命令/雷达回 ACK）帧头 = FD FC FB FA，帧尾 = 04 03 02 01
+ *   - 旧代码错把控制帧头当数据帧头来扫，真机上永远匹配不到 → radarOk 恒 false、
+ *     presence 恒 false → 做饭判定与自检 R1 全部失效（真机才暴露，语法检查看不出来）
+ *
+ * 数据帧内容（len 字节，普通模式 13 / 工程模式 32）：
+ *   d[0]=0x02 数据类型, d[1]=0xAA 帧头校验
+ *   d[2..3]   目标状态（0=无人 1=移动 2=静止 3=移动+静止）
+ *   d[4..5]   移动目标距离(cm)   d[6..7] 移动能量
+ *   d[8..9]   静止目标距离(cm)   d[10..11] 静止能量
+ */
 void radarPoll() {
   static uint8_t w[4] = {0, 0, 0, 0};
   while (Serial1.available() > 0) {
     uint8_t b = (uint8_t)Serial1.read();
     w[0] = w[1]; w[1] = w[2]; w[2] = w[3]; w[3] = b;
-    if (!(w[0] == 0xFD && w[1] == 0xFC && w[2] == 0xFB && w[3] == 0xFA)) continue;
+    if (!(w[0] == 0xF4 && w[1] == 0xF3 && w[2] == 0xF2 && w[3] == 0xF1)) continue;
+
     unsigned long t0 = millis();
     while (Serial1.available() < 2 && millis() - t0 < 20UL) delay(1);
     if (Serial1.available() < 2) return;
     uint8_t l0 = (uint8_t)Serial1.read(), l1 = (uint8_t)Serial1.read();
     uint16_t len = (uint16_t)l0 | ((uint16_t)l1 << 8);
-    if (len < 8 || len > 64) continue;                 // 异常帧丢弃，不阻塞
+    if (len < 13 || len > 64) continue;                 // 异常帧丢弃，不阻塞主循环
     while (Serial1.available() < (int)len && millis() - t0 < 40UL) delay(1);
     if (Serial1.available() < (int)len) return;
     uint8_t d[64];
     for (uint16_t i = 0; i < len; i++) d[i] = (uint8_t)Serial1.read();
-    if (d[0] == 0x02) {                                // 目标状态帧
-      sen.presence = (d[2] != 0);
-      sen.distCm   = d[7];
+
+    if (d[0] == 0x02 && d[1] == 0xAA) {                 // 目标数据帧
+      uint16_t st = (uint16_t)d[2] | ((uint16_t)d[3] << 8);
+      uint16_t movingDist = (uint16_t)d[4] | ((uint16_t)d[5] << 8);
+      uint16_t staticDist = (uint16_t)d[8] | ((uint16_t)d[9] << 8);
+      sen.presence = (st != 0);
+      // 距离优先取"动的那个"，都没有才是 0（旧代码取的是能量字节，量纲完全错）
+      sen.distCm   = movingDist ? movingDist : staticDist;
       sen.radarOk  = true;
       sen.radarLastMs = millis();
     }
@@ -1220,13 +1239,21 @@ bool otaFromUrl(const char* url, const char* expectSha) {
   int remain = total;
   Stream& s = http.getStream();
   bool ok = true;
+  unsigned long lastKeepalive = millis();
   while (remain > 0) {
     int n = s.readBytes(buf, remain > 1024 ? 1024 : remain);
     if (n <= 0) { ok = false; break; }
     SHA256_UPDATE(&ctx, buf, (unsigned)n);
     if (Update.write(buf, (size_t)n) != (size_t)n) { ok = false; break; }
     remain -= n;
-    if (++chunk % 32 == 0) esp_task_wdt_reset();   // 每 32KB 喂狗（不能用 remain%32768，非整数倍时永不命中）
+    if (++chunk % 32 == 0) {
+      esp_task_wdt_reset();                        // 每 32KB 喂狗（不能用 remain%32768，非整数倍时永不命中）
+      mqtt.loop();                                 // 下载期间保持 MQTT 链路（否则 broker 保活超时会断开）
+    }
+    if (millis() - lastKeepalive >= 10000UL) {     // 每 10 秒一条轻量心跳，后台不会误判离线
+      lastKeepalive = millis();
+      if (mqtt.connected()) publishOtaKeepalive();
+    }
   }
   unsigned char out[32];
   SHA256_FINISH(&ctx, out);
@@ -1270,6 +1297,17 @@ void publishSnap() {
   serializeJson(doc, buf);
   mqtt.publish(topic("snap").c_str(), buf);
   Serial.println("[SNAP] 场景快照已上传（等待后台场景判定）");
+}
+
+/* OTA 升级期间的轻量保活上报。
+ * 为什么要它：下载 1.1MB 固件 + 校验 + 重启的这段时间里主循环被占用，原本 60 秒的心跳会断，
+ * 后台按 100 秒超时会把「正在升级」判成「设备离线」，用户以为升级失败。
+ * 这里只发 200 字节最小状态（state=ota），既不占栈也不干扰升级。 */
+void publishOtaKeepalive() {
+  char b[220];
+  snprintf(b, sizeof(b), "{\"id\":\"%s\",\"ts\":%lu,\"tsConf\":\"%s\",\"state\":\"ota\"}",
+           DEVICE_ID, (unsigned long)nowEpoch(), timeReady ? "synced" : "unset");
+  mqtt.publish(topic("status").c_str(), b);
 }
 
 /* 处理后台下行指令 */
