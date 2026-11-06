@@ -210,7 +210,9 @@ function guardReport(device, kind, msg) {
   return !DEV_SECRET_STRICT;   // 兼容模式：记录但放行；严格模式：丢弃
 }
 
-const AUTH_EXEMPT = new Set(['/api/health', '/api/auth/login']);
+// 免登录白名单：健康检查、登录本身，以及「客户端查最新版本」——它只返回版本号和下载地址，
+// 不含任何业务数据，且登录页也需要能提示升级。
+const AUTH_EXEMPT = new Set(['/api/health', '/api/auth/login', '/api/app/version']);
 app.use('/api', (req, res, next) => {
   const p = (req.originalUrl || req.url || '').split('?')[0];
   if (AUTH_EXEMPT.has(p)) return next();
