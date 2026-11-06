@@ -222,11 +222,22 @@
   .u-new .lr label{display:block;font-size:12px;color:var(--sub);margin-bottom:4px}
   .u-new .lr input{width:100%;box-sizing:border-box;padding:8px 10px;font-size:14px;border:1px solid #ccd3e0;border-radius:8px}
   .ver{font-size:12.5px; font-weight:500; color:#8A908D; margin-left:9px; vertical-align:middle; letter-spacing:.02em}
+
+/* 客户端升级提示条：只在电脑端/安卓端壳里出现（UA 带版本号），纯浏览器不打扰 */
+.upbar{display:none;align-items:center;gap:12px;flex-wrap:wrap;background:#fffbeb;border-bottom:1px solid #fcd34d;
+  padding:9px 18px;font-size:13px;color:#92400e;position:sticky;top:0;z-index:6}
+.upbar button{background:#b45309;color:#fff;border:0;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer}
+.upbar .later{background:transparent;color:#92400e;text-decoration:underline;padding:6px 4px}
 </style>
 </head>
 <body>
+<div class="upbar" id="upbar">
+  <span id="upbar-text"></span>
+  <button id="upbar-go">立即下载</button>
+  <button class="later" id="upbar-later">稍后</button>
+</div>
 <header>
-  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.2</span></h1>
+  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.3</span></h1>
   <nav class="topnav" id="topnav">
     <div class="navbtn on" data-view="devices">全部设备</div>
     <div class="navbtn" data-view="flash">程序烧录</div>
@@ -2000,6 +2011,39 @@ async function loadUsers() {
   }
 }
 
+/* ── 客户端升级检查 ──
+ * 壳（电脑端 / 安卓端）在 UA 里带上自己的版本号，页面拿它和后台发布版本比对。
+ * 纯浏览器访问没有版本标识，不提示。 */
+function cmpVer(a, b) {
+  const A = String(a).split('.').map(Number), B = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const x = A[i] || 0, y = B[i] || 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
+async function checkUpdate() {
+  const ua = navigator.userAgent || '';
+  const pc = ua.match(/XZLKitchenPC\/([\d.]+)/);
+  const ad = ua.match(/XZLKitchenApp\/([\d.]+)/);
+  const cur = pc ? pc[1] : (ad ? ad[1] : '');
+  if (!cur) return;                       // 普通浏览器：不提示
+  const platform = pc ? 'windows' : 'android';
+  const r = await api('/api/app/version?platform=' + platform).catch(() => null);
+  const rel = r && r.release && r.release[platform];
+  if (!rel || !rel.version || !rel.url) return;
+  if (cmpVer(rel.version, cur) <= 0) return;   // 已是最新
+  const bar = $('#upbar');
+  if (!bar) return;
+  $('#upbar-text').textContent = '发现新版本 v' + rel.version + '（当前 v' + cur + '）';
+  bar.style.display = 'flex';
+  $('#upbar-go').onclick = () => {
+    window.open(rel.url, '_blank');        // 站外地址由壳交给系统浏览器下载
+  };
+  $('#upbar-later').onclick = () => { bar.style.display = 'none'; };
+}
+
 async function boot() {
   // 免登录校验：本地有令牌且服务端有效 → 直接进入
   const token = localStorage.getItem('xz_token') || '';
@@ -2028,6 +2072,7 @@ async function boot() {
   }
   else setPill('srv', false);
   connectWS();
+  checkUpdate();          // 仅电脑端 / 安卓端壳内生效（UA 带版本号才有结果）
 }
 boot();
 setInterval(loadDevices, 15000);

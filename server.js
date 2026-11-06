@@ -171,7 +171,7 @@ function loginFail(account) {
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 // 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '1.0.3';
 
 // 上行数据签名密钥：与固件 dev_secret 同值。未设置时进入兼容模式（只记录不拦截），
 // 设置 DEV_SECRET_STRICT=1 后才强制丢弃未签名/签名错误的上报。
@@ -1083,6 +1083,24 @@ app.post('/api/devices/:id/ai', deviceParam, async (req, res) => {
 // 服务健康
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, version: APP_VERSION, mqtt: mqttClient && mqttClient.connected, devices: Object.keys(store.getDevices()).length });
+});
+
+/* 客户端版本与升级来源：客户端 UA 里带 XZLKitchenPC/x.x.x 或 XZLKitchenApp/x.x.x，
+ * 页面据此比较版本并在程序内提示升级。地址走环境变量，发版时不用改代码。 */
+const APP_RELEASE = {
+  windows: {
+    version: process.env.APP_EXE_VERSION || APP_VERSION,
+    url: process.env.APP_EXE_URL || 'https://aka.doubaocdn.com/s/gdldmDIj4n',
+  },
+  android: {
+    version: process.env.APP_APK_VERSION || APP_VERSION,
+    url: process.env.APP_APK_URL || '/app/xzl-kitchen.apk',
+  },
+};
+app.get('/api/app/version', (req, res) => {
+  const platform = String(req.query.platform || '').toLowerCase();
+  const one = platform === 'windows' || platform === 'android' ? { [platform]: APP_RELEASE[platform] } : APP_RELEASE;
+  res.json({ ok: true, backend: APP_VERSION, release: one });
 });
 
 /* ---------------- MQTT 连接 ---------------- */
