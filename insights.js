@@ -48,6 +48,12 @@ function allEvents(store) {
   return store.listEvents(null, 5000);
 }
 
+const WEEKDAY_LABEL = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+/** 本地（UTC+8）星期几 */
+function weekdayOf(ts) {
+  return new Date((ts || 0) + TZ_OFFSET).getUTCDay();
+}
+
 function startOfDay(ts) {
   const local = ts + TZ_OFFSET;
   const dayStartLocal = Math.floor(local / DAY) * DAY;
@@ -80,10 +86,12 @@ function relTime(ts, now) {
  */
 function buildOverview(store, days) {
   const now = Date.now();
-  const span = (days || 7) * DAY;
-  const since = now - span;
-  const devices = store.getDevices();
   const events = allEvents(store);
+  const allMode = days === 0;                     // 0 = 全部：从最早一条事件算起
+  const earliest = events.reduce((acc, e) => Math.min(acc, e.ts || now), now);
+  const span = allMode ? Math.max(DAY, now - earliest) : (days || 7) * DAY;
+  const since = allMode ? earliest : now - span;
+  const devices = store.getDevices();
   const windowEvents = events.filter((e) => (e.ts || 0) >= since);
 
   const since24 = now - DAY;
@@ -95,10 +103,11 @@ function buildOverview(store, days) {
   const byHour = Array.from({ length: 24 }, (_, h) => ({ hour: h, count: 0 }));
   ev24.forEach((e) => { byHour[localHour(e.ts)].count += 1; });
 
+  const dayCount = allMode ? Math.min(120, Math.max(1, Math.ceil((now - startOfDay(earliest)) / DAY))) : days;
   const byDay = [];
-  for (let i = days - 1; i >= 0; i--) {
+  for (let i = dayCount - 1; i >= 0; i--) {
     const d0 = startOfDay(now) - i * DAY;
-    byDay.push({ date: fmtLocal(d0).slice(0, 10), ts: d0, count: 0 });
+    byDay.push({ date: fmtLocal(d0).slice(0, 10), ts: d0, count: 0, weekday: weekdayOf(d0) });
   }
   windowEvents.forEach((e) => {
     const idx = byDay.findIndex((d) => e.ts >= d.ts && e.ts < d.ts + DAY);
@@ -128,10 +137,29 @@ function buildOverview(store, days) {
       events24h: dev24.length,
       eventsWindow: dev.length,
       security24h: sec.length,
+      securityWindow: dev.filter((e) => e.type === 'security').length,
+      activeDays: new Set(dev.map((e) => fmtLocal(e.ts).slice(0, 10))).size,
+      freqPerDay: dev.length ? Number((dev.filter((e) => e.ts >= since).length / Math.max(1, dayCount)).toFixed(2)) : 0,
+      offlineCount: dev.filter((e) => e.type === 'device' && /离线/.test(e.text || '')).length,
+      onlineCount: dev.filter((e) => e.type === 'device' && /在线/.test(e.text || '')).length,
+      firstEventAt: dev.length ? fmtLocal(Math.min(...dev.map((e) => e.ts))) : '—',
       health: score,
       healthTag: score >= 85 ? 'good' : score >= 60 ? 'warn' : 'bad',
     };
   }).sort((a, b) => a.health - b.health);
+
+  // 一周里哪几天用得最多（按真实事件时间）
+  const byWeekday = Array.from({ length: 7 }, (_, w) => ({ weekday: w, label: WEEKDAY_LABEL[w], count: 0 }));
+  windowEvents.forEach((e) => { byWeekday[weekdayOf(e.ts)].count += 1; });
+
+  // 报警时段：只有 security 事件才画，没有就不出空图
+  const alarmByHour = Array.from({ length: 24 }, (_, h) => ({ hour: h, count: 0 }));
+  windowEvents.filter((e) => e.type === 'security').forEach((e) => { alarmByHour[localHour(e.ts)].count += 1; });
+  const alarmTotal = windowEvents.filter((e) => e.type === 'security').length;
+
+  // 使用频率排行（窗口内事件数多的在前）
+  const ranking = rows.slice().sort((a, b) => (b.eventsWindow || 0) - (a.eventsWindow || 0))
+    .slice(0, 5).map((r) => ({ id: r.id, count: r.eventsWindow, activeDays: r.activeDays }));
 
   const online = rows.filter((r) => r.online).length;
   return {
@@ -154,12 +182,13 @@ function buildOverview(store, days) {
       .map((t) => ({ type: t, label: TYPE_LABEL[t] || t, count: byType[t] })),
     byHour,
     byDay,
+    byWeekday,
+    alarmByHour,
+    alarmTotal,
+    ranking,
+    days: dayCount,
+    allMode,
     devices: rows,
-    dataCoverage: {
-      real: REAL_EVENT_TYPES,
-      placeholder: PLACEHOLDER_FIELDS,
-      note: '统计只基于真实事件流与设备上报时间。做饭行为、离厨时长、传感器读数在固件接入真实硬件前不做统计，避免展示恒定的假值。',
-    },
   };
 }
 

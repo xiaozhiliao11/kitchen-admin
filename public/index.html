@@ -280,20 +280,47 @@ table.ins-table{width:100%;border-collapse:collapse;font-size:13px;table-layout:
   .ins-kpis{grid-template-columns:repeat(4,1fr)}
   .ins-charts{grid-template-columns:repeat(3,1fr)}
 }
+
+/* 无线测试 */
+.wt-form{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.wt-form label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#646A73}
+.wt-form select,.wt-form input{min-width:150px;padding:7px 10px;border:1px solid #e5e6eb;border-radius:8px;font-size:14px;background:#fff}
+.wt-items{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media(max-width:640px){.wt-items{grid-template-columns:repeat(2,1fr)}}
+.wt-item{border:1px solid #e5e6eb;border-radius:10px;padding:10px;cursor:pointer;background:#fff;transition:.15s}
+.wt-item:hover{border-color:#16a34a}
+.wt-item.on{border-color:#16a34a;box-shadow:0 0 0 2px rgba(22,163,74,.12)}
+.wt-item.good{border-left:3px solid #16a34a}
+.wt-item.bad{border-left:3px solid #dc2626}
+.wt-item-name{font-weight:600;font-size:14px}
+.wt-item-scene{font-size:12px;color:#86909c;margin:2px 0 4px}
+.wt-item-meta{font-size:12px;color:#646A73}
+.wt-record{margin-top:14px;padding:12px;border:1px dashed #e5e6eb;border-radius:10px;background:#fbfcfe}
+.wt-res{display:flex;gap:8px}
+.wt-res button{padding:6px 14px;border:1px solid #e5e6eb;border-radius:8px;background:#fff;cursor:pointer;font-size:13px}
+.wt-res button.on{background:#16a34a;color:#fff;border-color:#16a34a}
+.wt-adv{padding:10px 12px;border-radius:8px;margin-bottom:8px;font-size:13px}
+.wt-adv.high{background:#fef2f2;border-left:3px solid #dc2626}
+.wt-adv.mid{background:#fffbeb;border-left:3px solid #d97706}
+.wt-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px}
+.wt-table th,.wt-table td{padding:8px 6px;border-bottom:1px solid #f2f3f5;text-align:left;word-break:break-all}
+.wt-table th{color:#86909c;font-weight:500;font-size:12px}
 </style>
 </head>
 <body>
 <div class="upbar" id="upbar">
   <span id="upbar-text"></span>
   <button id="upbar-go">立即下载</button>
+  <button class="later" id="upbar-recheck">我已更新</button>
   <button class="later" id="upbar-later">稍后</button>
 </div>
 <header>
-  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.5</span></h1>
+  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.6</span></h1>
   <nav class="topnav" id="topnav">
     <div class="navbtn on" data-view="devices">全部设备</div>
     <div class="navbtn" data-view="insights">用户数据库</div>
     <div class="navbtn" data-view="flash">程序烧录</div>
+    <div class="navbtn" data-view="wt">无线测试</div>
     <div class="navbtn" data-view="ai">AI 与工作流</div>
     <div class="navbtn" data-view="debug">有线调试</div>
   </nav>
@@ -400,9 +427,10 @@ function setView(v) {
   view = v;
   document.querySelectorAll('.navbtn').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
   if (v === 'devices') renderHome();
-  else if (v === 'flash') { loadModels().finally(() => renderFlashPage()); }
+  else if (v === 'flash') { if (isMobileDevice()) { setView('devices'); return; } loadModels().finally(() => renderFlashPage()); }
+  else if (v === 'wt') renderTestPage();
   else if (v === 'ai') renderAIPage();
-  else if (v === 'debug') renderDebugPage();
+  else if (v === 'debug') { if (isMobileDevice()) { setView('devices'); return; } renderDebugPage(); }
   else if (v === 'users') renderUsersPage();
   else if (v === 'insights') renderInsightsPage();
   else if (v === 'detail') {
@@ -2161,7 +2189,8 @@ function renderInsightsPage() {
     '<div class="ins-head"><h2>用户数据库</h2>' +
       '<span>统计口径：设备真实事件流与上报时间，不含未接入的传感器读数</span></div>' +
     '<div class="ins-seg" id="ins-seg">' +
-      '<button data-d="1">近 24 小时</button><button data-d="7" class="on">近 7 天</button><button data-d="30">近 30 天</button>' +
+      '<button data-d="1">近 24 小时</button><button data-d="7" class="on">近 7 天</button>' +
+      '<button data-d="30">近 30 天</button><button data-d="0">全部</button>' +
       '<button id="ins-refresh" style="margin-left:auto">刷新</button>' +
     '</div>' +
     '<div id="ins-body"><div class="empty">正在汇总…</div></div>';
@@ -2202,14 +2231,17 @@ function drawInsights() {
     '<div class="ins-charts">' +
       '<div class="ins-chart"><h3>事件类型分布</h3><p>近 ' + d.windowDays + ' 天真实事件归类</p><div class="ins-canvas" id="ins-c-type"></div></div>' +
       '<div class="ins-chart"><h3>主机活跃时段</h3><p>近 24 小时按小时统计（当地时间）</p><div class="ins-canvas" id="ins-c-hour"></div></div>' +
-      '<div class="ins-chart"><h3>近 ' + d.windowDays + ' 天趋势</h3><p>每日事件量；最多回溯 5000 条记录窗口</p><div class="ins-canvas" id="ins-c-day"></div></div>' +
+      '<div class="ins-chart"><h3>' + (d.allMode ? '全部' : '近 ' + d.windowDays + ' 天') + '趋势</h3><p>每日事件量；最多回溯 5000 条记录窗口</p><div class="ins-canvas" id="ins-c-day"></div></div>' +
+      '<div class="ins-chart"><h3>一周使用分布</h3><p>哪几天用得最多（按真实事件时间）</p><div class="ins-canvas" id="ins-c-week"></div></div>' +
+      '<div class="ins-chart"><h3>报警时段</h3><p>仅统计安全/报警事件，没有报警时不出图</p><div class="ins-canvas" id="ins-c-alarm"></div></div>' +
     '</div>' +
+    '<div id="ins-habits"></div>' +
     '<div class="card"><h2 style="margin:0 0 4px;font-size:15px">主机使用情况</h2>' +
       '<p class="muted" style="margin:0 0 8px;font-size:12.5px">健康度 = 在线状态 + 24 小时有无上报 + 24 小时安全事件，三项扣分制。点一行看单机明细。</p>' +
       '<div class="ins-tablewrap"><table class="ins-table">' +
-        '<colgroup><col style="width:15%"><col style="width:9%"><col style="width:9%"><col style="width:20%"><col style="width:13%"><col style="width:11%"><col style="width:13%"></colgroup>' +
-        '<thead><tr><th>主机</th><th>健康度</th><th>状态</th><th>最后上报</th><th>24h 事件</th><th>安全</th><th>固件</th></tr></thead><tbody>' +
-        (d.devices.length ? d.devices.map(insRow).join('') : '<tr><td colspan="7"><span class="muted">还没有主机</span></td></tr>') +
+        '<colgroup><col style="width:14%"><col style="width:8%"><col style="width:8%"><col style="width:17%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:8%"></colgroup>' +
+        '<thead><tr><th>主机</th><th>健康度</th><th>状态</th><th>最后上报</th><th>24h 事件</th><th>窗口事件</th><th>活跃天数</th><th>报警</th><th>离线次数</th><th>固件</th></tr></thead><tbody>' +
+        (d.devices.length ? d.devices.map(insRow).join('') : '<tr><td colspan="10"><span class="muted">还没有主机</span></td></tr>') +
       '</tbody></table></div>' +
       '<div id="ins-detail"></div></div>' +
     '<div id="ins-sug-wrap"></div>' +
@@ -2221,9 +2253,9 @@ function drawInsights() {
     if (tr) insShowDetail(tr.dataset.id);
   });
   drawInsCharts();
+  drawInsHabits();
   drawInsSuggestions();
   drawInsTuning();
-  drawInsGap();
   drawInsLibrary();
 }
 
@@ -2237,7 +2269,10 @@ function insRow(r) {
     '<td>' + on + '</td>' +
     '<td>' + esc(r.lastSeen) + '</td>' +
     '<td>' + r.events24h + '</td>' +
-    '<td>' + (r.security24h ? '<span style="color:var(--red)">' + r.security24h + '</span>' : '0') + '</td>' +
+    '<td>' + (r.eventsWindow || 0) + '</td>' +
+    '<td>' + (r.activeDays || 0) + '</td>' +
+    '<td>' + ((r.securityWindow || 0) ? '<span style="color:var(--red)">' + r.securityWindow + '</span>' : '0') + '</td>' +
+    '<td>' + (r.offlineCount || 0) + '</td>' +
     '<td style="font-size:12px">' + (esc(r.fw) || '—') + '</td></tr>';
 }
 
@@ -2281,6 +2316,38 @@ function drawInsCharts() {
       });
     }
 
+    const weekEl = $('#ins-c-week');
+    if (weekEl) {
+      insState.charts.week = echarts.init(weekEl);
+      insState.charts.week.setOption({
+        grid: { left: 30, right: 8, top: 14, bottom: 24 },
+        tooltip: { trigger: 'axis', formatter: (p) => p[0].axisValue + ' · ' + p[0].value + ' 条' },
+        xAxis: { type: 'category', data: d.byWeekday.map((x) => x.label), ...axis, axisLabel: { color: '#646A73', fontSize: 11 } },
+        yAxis: { type: 'value', ...axis, minInterval: 1 },
+        series: [{ type: 'bar', barMaxWidth: 18, data: d.byWeekday.map((x) => ({
+          value: x.count, itemStyle: { color: '#16A34A', borderRadius: [3, 3, 0, 0] } })),
+        }],
+      });
+    }
+
+    const alarmEl = $('#ins-c-alarm');
+    if (alarmEl) {
+      if (!d.alarmTotal) {
+        alarmEl.innerHTML = '<div class="empty" style="padding-top:70px">该范围内没有报警事件</div>';
+      } else {
+        insState.charts.alarm = echarts.init(alarmEl);
+        insState.charts.alarm.setOption({
+          grid: { left: 34, right: 8, top: 14, bottom: 24 },
+          tooltip: { trigger: 'axis', formatter: (p) => p[0].axisValue + ' 点 · ' + p[0].value + ' 次' },
+          xAxis: { type: 'category', data: d.alarmByHour.map((x) => x.hour), ...axis, axisLabel: { color: '#646A73', fontSize: 10, interval: 3 } },
+          yAxis: { type: 'value', ...axis, minInterval: 1 },
+          series: [{ type: 'bar', barMaxWidth: 12, data: d.alarmByHour.map((x) => ({
+            value: x.count, itemStyle: { color: '#DC2626', borderRadius: [3, 3, 0, 0] } })),
+          }],
+        });
+      }
+    }
+
     const dayEl = $('#ins-c-day');
     if (dayEl) {
       insState.charts.day = echarts.init(dayEl);
@@ -2302,6 +2369,217 @@ function drawInsCharts() {
       if (el) el.innerHTML = '<div class="empty" style="padding-top:60px">图表库加载失败，数据见下方表格</div>';
     });
   });
+}
+
+/* ================= 无线测试（实机现场验证） =================
+ * 开发者到厨房现场，选设备/日期/测试人员 → 开始记录 → 逐项模拟场景录结果。
+ * 失败项多了系统会给整改建议；全部记录留在服务端，手机和电脑看到的是同一份。 */
+const wtState = { tests: [], items: [], current: null, advice: [], users: [], pick: '', result: 'ok' };
+
+async function loadTesters() {
+  try {
+    const r = await api('/api/users');
+    wtState.users = (r.users || []).map((u) => u.name || u.account).filter(Boolean);
+  } catch (e) { wtState.users = []; }
+  if (!wtState.users.length && me) wtState.users = [me.name || me.account || '我'];
+  return wtState.users;
+}
+
+async function renderTestPage() {
+  if (!wtState.items.length) {
+    try { const r = await api('/api/tests'); wtState.items = r.items || []; } catch (e) {}
+  }
+  if (!wtState.users.length) await loadTesters();
+  await refreshTests();
+}
+
+async function refreshTests() {
+  try {
+    const r = await api('/api/tests');
+    wtState.tests = r.tests || [];
+    wtState.items = r.items || wtState.items;
+    const running = wtState.tests.find((t) => t.status === 'running');
+    if (running && (!wtState.current || wtState.current.id !== running.id)) {
+      const d = await api('/api/tests/' + running.id);
+      wtState.current = d.test; wtState.advice = d.advice || [];
+    }
+    if (!running) { wtState.current = null; wtState.advice = []; }
+  } catch (e) {}
+  drawTestPage();
+}
+
+function drawTestPage() {
+  const today = new Date().toISOString().slice(0, 10);
+  const devOpt = devices.map((d) => '<option value="' + esc(d.id) + '">' + esc(d.id) + (d.name ? ' · ' + esc(d.name) : '') + '</option>').join('');
+  const userOpt = wtState.users.map((u) => '<option value="' + esc(u) + '">' + esc(u) + '</option>').join('');
+  const cur = wtState.current;
+
+  let html = '<div class="page-head"><h2>无线测试</h2>' +
+    '<span class="muted">现场逐项验证：模拟场景 → 记录是否误报/漏报/数值不对 → 系统给整改建议</div>';
+
+  // 新建（没有进行中的测试才显示）
+  if (!cur) {
+    html += '<div class="card"><h2 style="font-size:15px;margin:0 0 12px">开始一场测试</h2>' +
+      '<div class="wt-form">' +
+      '<label>设备<select id="wt-dev">' + (devOpt || '<option value="">暂无设备</option>') + '</select></label>' +
+      '<label>测试日期<input type="date" id="wt-date" value="' + today + '"></label>' +
+      '<label>测试人员<select id="wt-user">' + (userOpt || '<option value="">' + esc((me && (me.name || me.account)) || '我') + '</option>') + '</select></label>' +
+      '<button class="primary" id="wt-start">确认开始记录</button>' +
+      '</div></div>';
+  } else {
+    html += '<div class="card"><div class="page-head" style="margin:0 0 10px">' +
+      '<h2 style="font-size:15px;margin:0">进行中：' + esc(cur.device) + ' · ' + esc(cur.date) + ' · ' + esc(cur.tester) + '</h2>' +
+      '<button id="wt-finish">结束本场测试</button></div>' +
+      '<p class="muted" style="margin:0 0 10px">点一个项目 → 现场做这个动作 → 选结果提交。一次只记一条，记完立刻出建议。</p>' +
+      '<div class="wt-items">' + wtState.items.map((it) => {
+        const done = (cur.items || []).filter((x) => x.item === it.id);
+        const bad = done.filter((x) => x.result !== 'ok').length;
+        const cls = wtState.pick === it.id ? ' on' : (done.length ? (bad ? ' bad' : ' good') : '');
+        return '<div class="wt-item' + cls + '" data-item="' + it.id + '">' +
+          '<div class="wt-item-name">' + esc(it.name) + '</div>' +
+          '<div class="wt-item-scene">' + esc(it.scene) + '</div>' +
+          '<div class="wt-item-meta">' + (done.length ? ('已记 ' + done.length + ' 次' + (bad ? '，问题 ' + bad : '')) : '未记录') + '</div></div>';
+      }).join('') + '</div>';
+
+    // 选中项后的记录表单
+    const pickInfo = wtState.items.find((x) => x.id === wtState.pick);
+    if (pickInfo) {
+      html += '<div class="wt-record"><div style="margin-bottom:8px"><b>' + esc(pickInfo.name) + '</b>' +
+        '<span class="muted"> · ' + esc(pickInfo.scene) + '</span></div>' +
+        '<div class="wt-res">' + [['ok', '正常'], ['noise', '误报'], ['miss', '漏报'], ['value', '数值不对']].map((r) =>
+          '<button data-res="' + r[0] + '"' + (wtState.result === r[0] ? ' class="on"' : '') + '>' + r[1] + '</button>').join('') + '</div>' +
+        '<div class="wt-form" style="margin-top:8px">' +
+        '<label>实测数值/现象<input id="wt-value" placeholder="如 距离 2.1m / 没响 / 响了两声"></label>' +
+        '<label>备注<input id="wt-note" placeholder="现场情况、第几次、环境"></label>' +
+        '<button class="primary" id="wt-add">记下这条</button></div></div>';
+    }
+
+    // 本场已记条目
+    if ((cur.items || []).length) {
+      html += '<div class="card"><h2 style="font-size:15px;margin:0 0 8px">本场记录（' + cur.items.length + ' 条）</h2>' +
+        '<table class="wt-table"><colgroup><col style="width:16%"><col style="width:14%"><col style="width:12%"><col style="width:22%"><col style="width:36%"></colgroup>' +
+        '<thead><tr><th>时间</th><th>项目</th><th>结果</th><th>实测</th><th>备注</th></tr></thead><tbody>' +
+        cur.items.map((x) => '<tr><td>' + fmtLocal(x.at).slice(11) + '</td><td>' + esc((wtState.items.find((i) => i.id === x.item) || {}).name || x.item) +
+          '</td><td>' + (x.result === 'ok' ? '<span style="color:var(--green)">正常</span>' : '<span style="color:var(--red)">' + RESULT_NAME(x.result) + '</span>') +
+          '</td><td>' + (esc(x.value) || '—') + '</td><td>' + (esc(x.note) || '—') + '</td></tr>').join('') +
+        '</tbody></table></div>';
+    }
+
+    // 建议
+    if (wtState.advice.length) {
+      html += '<div class="card"><h2 style="font-size:15px;margin:0 0 8px">整改建议</h2>' +
+        wtState.advice.map((a) => '<div class="wt-adv ' + a.level + '"><div><b>' + esc(a.name) + '</b>' +
+          '<span class="muted"> · ' + esc(a.detail) + '</span></div><div style="margin-top:4px">' + esc(a.fix) + '</div></div>').join('') + '</div>';
+    }
+  }
+
+  // 历史
+  html += '<div class="card"><h2 style="font-size:15px;margin:0 0 8px">历史测试记录（' + wtState.tests.length + ' 场）</h2>' +
+    (wtState.tests.length ? '<table class="wt-table"><colgroup><col style="width:10%"><col style="width:16%"><col style="width:12%"><col style="width:12%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:20%"></colgroup>' +
+      '<thead><tr><th>编号</th><th>设备</th><th>日期</th><th>测试人员</th><th>记录数</th><th>问题数</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
+      wtState.tests.map((t) => '<tr><td>' + esc(t.id) + '</td><td>' + esc(t.device) + '</td><td>' + esc(t.date) + '</td><td>' + esc(t.tester) +
+        '</td><td>' + t.count + '</td><td>' + (t.failCount ? '<span style="color:var(--red)">' + t.failCount + '</span>' : '0') +
+        '</td><td>' + (t.status === 'running' ? '<span class="badge">进行中</span>' : '已结束') +
+        '</td><td><button class="wt-open" data-id="' + esc(t.id) + '">查看</button></td></tr>').join('') + '</tbody></table>'
+      : '<div class="empty">还没有测试记录。上面选设备、日期、人员，点「确认开始记录」就行。</div>') + '</div>';
+
+  html += '</div>';
+  $('#main').innerHTML = html;
+  bindTestPage();
+}
+
+function RESULT_NAME(r) {
+  return { ok: '正常', noise: '误报', miss: '漏报', value: '数值不对' }[r] || r;
+}
+
+function bindTestPage() {
+  const start = $('#wt-start');
+  if (start) start.onclick = async () => {
+    const device = $('#wt-dev').value, date = $('#wt-date').value, tester = $('#wt-user').value;
+    if (!device) return alert('请选择设备');
+    start.disabled = true;
+    try {
+      const r = await api('/api/tests', { method: 'POST', body: JSON.stringify({ device, date, tester }) });
+      wtState.current = r.test; wtState.items = r.items || wtState.items; wtState.advice = [];
+      drawTestPage();
+    } catch (e) { start.disabled = false; alert('创建失败：' + (e.message || e)); }
+  };
+
+  document.querySelectorAll('.wt-item').forEach((el) => {
+    el.onclick = () => { wtState.pick = el.dataset.item; wtState.result = 'ok'; drawTestPage(); };
+  });
+  document.querySelectorAll('.wt-res button').forEach((b) => {
+    b.onclick = () => { wtState.result = b.dataset.res; drawTestPage(); };
+  });
+
+  const add = $('#wt-add');
+  if (add) add.onclick = async () => {
+    if (!wtState.current) return;
+    add.disabled = true;
+    try {
+      const r = await api('/api/tests/' + wtState.current.id + '/items', {
+        method: 'POST',
+        body: JSON.stringify({ item: wtState.pick, result: wtState.result, value: $('#wt-value').value, note: $('#wt-note').value }),
+      });
+      wtState.current = r.test; wtState.advice = r.advice || [];
+      wtState.pick = ''; wtState.result = 'ok';
+      drawTestPage();
+    } catch (e) { add.disabled = false; alert('记录失败：' + (e.message || e)); }
+  };
+
+  const fin = $('#wt-finish');
+  if (fin) fin.onclick = async () => {
+    if (!confirm('结束本场测试？结束后不能再追加记录。')) return;
+    try {
+      const r = await api('/api/tests/' + wtState.current.id + '/finish', { method: 'POST', body: '{}' });
+      wtState.current = null; wtState.advice = r.advice || [];
+      await refreshTests();
+    } catch (e) { alert('结束失败：' + (e.message || e)); }
+  };
+
+  document.querySelectorAll('.wt-open').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        const r = await api('/api/tests/' + b.dataset.id);
+        const rows = (r.test.items || []).map((x) => '<tr><td>' + fmtLocal(x.at) + '</td><td>' +
+          esc((r.allItems.find((i) => i.id === x.item) || {}).name || x.item) + '</td><td>' + RESULT_NAME(x.result) +
+          '</td><td>' + (esc(x.value) || '—') + '</td><td>' + (esc(x.note) || '—') + '</td></tr>').join('');
+        $('#main').innerHTML = '<div class="page-head"><h2>测试详情 ' + esc(r.test.id) + '</h2>' +
+          '<button id="wt-back">返回列表</button></div>' +
+          '<div class="card"><p class="muted">' + esc(r.test.device) + ' · ' + esc(r.test.date) + ' · ' + esc(r.test.tester) +
+          ' · ' + (r.test.items || []).length + ' 条</p>' +
+          (rows ? '<table class="wt-table"><colgroup><col style="width:18%"><col style="width:18%"><col style="width:12%"><col style="width:22%"><col style="width:30%"></colgroup><thead><tr><th>时间</th><th>项目</th><th>结果</th><th>实测</th><th>备注</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="empty">本场没有记录</div>') +
+          '</div>' + ((r.advice || []).length ? '<div class="card"><h2 style="font-size:15px">整改建议</h2>' +
+          r.advice.map((a) => '<div class="wt-adv ' + a.level + '"><b>' + esc(a.name) + '</b><span class="muted"> · ' + esc(a.detail) + '</span><div>' + esc(a.fix) + '</div></div>').join('') + '</div>' : '');
+        $('#wt-back').onclick = () => renderTestPage();
+      } catch (e) { alert('读取失败：' + (e.message || e)); }
+    };
+  });
+}
+
+/** 使用习惯摘要：每条都由数据算出来，不写套话 */
+function drawInsHabits() {
+  const wrap = $('#ins-habits');
+  if (!wrap) return;
+  const d = insState.data;
+  const items = [];
+  const peakHour = d.byHour.reduce((a, b) => (b.count > a.count ? b : a), { hour: 0, count: 0 });
+  if (peakHour.count > 0) items.push('最活跃时段：' + peakHour.hour + ':00–' + ((peakHour.hour + 1) % 24) + ':00，共 ' + peakHour.count + ' 条记录');
+  const peakWeek = d.byWeekday.reduce((a, b) => (b.count > a.count ? b : a), { label: '', count: 0 });
+  if (peakWeek.count > 0) items.push('最活跃的一天：' + peakWeek.label + '（' + peakWeek.count + ' 条）');
+  const evWeek = d.byWeekday.filter((x) => x.count > 0).length;
+  if (evWeek) items.push('覆盖到的星期数：' + evWeek + '/7');
+  if (d.ranking && d.ranking.length) {
+    items.push('使用最多：' + d.ranking[0].id + '（' + d.ranking[0].count + ' 条，活跃 ' + d.ranking[0].activeDays + ' 天）');
+  }
+  const busiest = d.devices.slice().sort((a, b) => (b.activeDays || 0) - (a.activeDays || 0))[0];
+  if (busiest && busiest.activeDays) items.push('活跃天数最多：' + busiest.id + '（' + busiest.activeDays + ' 天）');
+  items.push('报警总数：' + (d.alarmTotal || 0) + ' 次' +
+    ((d.alarmTotal || 0) ? ('，其中 ' + d.alarmByHour.reduce((a, b) => (b.count > a.count ? b : a), { hour: 0, count: 0 }).hour + ' 点最集中') : ''));
+  wrap.innerHTML = '<div class="card"><h2 style="margin:0 0 6px;font-size:15px">使用习惯摘要</h2>' +
+    (items.length ? '<div class="ins-gap">' + items.map((x) => '· ' + esc(x)).join('<br>') + '</div>'
+                  : '<div class="empty">该范围内没有可统计的记录</div>') +
+    '<p class="muted" style="margin:8px 0 0;font-size:12px">以上全部由事件时间与类型算出；做饭行为、离厨时长等维度需要固件上报对应字段后才会出现在这里。</p></div>';
 }
 
 function drawInsSuggestions() {
@@ -2392,20 +2670,6 @@ function drawInsTuning() {
     '<div class="ins-lib" style="margin-top:10px">下发结果会逐台记录：主机号 / 是否在线 / 是否已执行。</div>' +
     '</div>';
   $('#ins-apply').onclick = () => insApply($('#ins-action').value, $('#ins-apply'));
-}
-
-function drawInsGap() {
-  const wrap = $('#ins-gap-wrap');
-  if (!wrap) return;
-  const cov = insState.data.dataCoverage;
-  wrap.innerHTML = '<div class="card"><h2 style="margin:0 0 4px;font-size:15px">数据缺口（不藏）</h2>' +
-    '<p class="muted" style="margin:0 0 8px;font-size:12.5px">' + esc(cov.note) + '</p>' +
-    '<div class="ins-gap">' +
-      '<div style="margin-bottom:6px"><b>已接入真实统计：</b>' + cov.real.map((x) => esc(x)).join('、') + '（事件类型）</div>' +
-      '<div><b>仍是占位常量、因此不参与分析：</b><br>' +
-        cov.placeholder.map((f) => '<code>' + esc(f.path) + '</code> ' + esc(f.label) + '（' + esc(f.fake) + '）').join('<br>') +
-      '</div>' +
-    '</div></div>';
 }
 
 function drawInsLibrary() {
@@ -2540,16 +2804,40 @@ async function checkUpdate() {
   const platform = pc ? 'windows' : 'android';
   const r = await api('/api/app/version?platform=' + platform).catch(() => null);
   const rel = r && r.release && r.release[platform];
-  if (!rel || !rel.version || !rel.url) return;
-  if (cmpVer(rel.version, cur) <= 0) return;   // 已是最新
   const bar = $('#upbar');
   if (!bar) return;
+  if (!rel || !rel.version || !rel.url) { bar.style.display = 'none'; return; }
+
+  // 已经不比当前版本新 → 收起提示，并清掉「已忽略」记录，避免下次真更新时被旧标记挡住
+  if (cmpVer(rel.version, cur) <= 0) {
+    bar.style.display = 'none';
+    if (localStorage.getItem('xz_up_dismiss') === rel.version) localStorage.removeItem('xz_up_dismiss');
+    return;
+  }
+  // 用户点过「稍后」的同一版本，本次不再弹（刷新多少次都不弹），换版本才会再提醒
+  if (localStorage.getItem('xz_up_dismiss') === rel.version) { bar.style.display = 'none'; return; }
+
   $('#upbar-text').textContent = '发现新版本 v' + rel.version + '（当前 v' + cur + '）';
   bar.style.display = 'flex';
   $('#upbar-go').onclick = () => {
     window.open(rel.url, '_blank');        // 站外地址由壳交给系统浏览器下载
   };
-  $('#upbar-later').onclick = () => { bar.style.display = 'none'; };
+  $('#upbar-later').onclick = () => {
+    localStorage.setItem('xz_up_dismiss', rel.version);
+    bar.style.display = 'none';
+  };
+  // 装完新版后，点一下这个按钮立刻复核；若确实已是新版本，提示自动消失
+  const recheck = $('#upbar-recheck');
+  if (recheck) recheck.onclick = async () => {
+    const cur2 = ((navigator.userAgent || '').match(pc ? /XZLKitchenPC\/([\d.]+)/ : /XZLKitchenApp\/([\d.]+)/) || [])[1] || '';
+    if (cur2 && cmpVer(rel.version, cur2) <= 0) {
+      localStorage.removeItem('xz_up_dismiss');
+      bar.style.display = 'none';
+      alert('已是最新版本 v' + cur2 + '，提示已收起');
+    } else {
+      alert('当前程序版本仍是 v' + (cur2 || cur) + '。\n请运行刚下载的安装包完成安装，装好后点「我已更新」复核。');
+    }
+  };
 }
 
 async function boot() {
@@ -2562,6 +2850,10 @@ async function boot() {
     me = await r.json();
   } catch (e) { /* 服务不可达：继续加载，顶部状态会显示服务离线 */ }
   renderUserBadge();
+  // 手机端（APK 与手机浏览器）没有串口，烧录/有线调试没有意义，直接收起来
+  if (isMobileDevice()) {
+    document.querySelectorAll('.navbtn[data-view="flash"], .navbtn[data-view="debug"]').forEach((b) => { b.style.display = 'none'; });
+  }
   // 并行发起：健康检查 / 设备列表 / 固件库 / 事件预热，互不阻塞，首屏更快
   const [h] = await Promise.all([
     api('/api/health').catch(() => null),

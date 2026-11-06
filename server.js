@@ -184,7 +184,7 @@ function loginFail(account) {
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 // 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
-const APP_VERSION = '1.0.5';
+const APP_VERSION = '1.0.6';
 
 // 上行数据签名密钥：与固件 dev_secret 同值。未设置时进入兼容模式（只记录不拦截），
 // 设置 DEV_SECRET_STRICT=1 后才强制丢弃未签名/签名错误的上报。
@@ -958,7 +958,9 @@ app.get('/api/firmwares/:id/download', (req, res) => {
 /* ---------------- 用户数据库：主机使用情况分析 ---------------- */
 /** 总览：设备清单 + 事件分布（小时/天）+ 数据覆盖说明 */
 app.get('/api/insights/overview', (req, res) => {
-  const days = Math.min(30, Math.max(1, parseInt(req.query.days, 10) || 7));
+  // days=0 表示「全部」：从最早一条事件算起；1~30 为窗口天数
+  const raw = parseInt(req.query.days, 10);
+  const days = raw === 0 ? 0 : Math.min(30, Math.max(1, raw || 7));
   res.json(insights.buildOverview(store, days));
 });
 
@@ -1006,6 +1008,163 @@ function modelOf(meta) {
     modelSrc: (meta && meta.modelSrc) || (m ? 'manual' : 'unknown'),
   };
 }
+
+/* ---------------- 无线测试（实机现场验证） ----------------
+ * 开发者到厨房现场，逐项模拟场景（人靠近/离开、燃气、声音、按键…），
+ * 记录「是否误报 / 是否漏报 / 数值是否对」，系统据此给整改建议。
+ * 记录全部落在 settings.wirelessTests，最多保留 100 场。 */
+const TEST_KEY = 'wirelessTests';
+
+/** 本地（UTC+8）日期 YYYY-MM-DD */
+function fmtDay(ts) {
+  const d = new Date((ts || Date.now()) + 8 * 3600 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
+
+/** 可测项目：与固件真正具备的输入通道一一对应 */
+const TEST_ITEMS = [
+  { id: 'presence', name: '人体存在（雷达）', scene: '人进入厨房区域', kind: 'sensor' },
+  { id: 'dist', name: '人体距离（雷达）', scene: '人走到 1m / 2m / 3m 处', kind: 'sensor' },
+  { id: 'gas', name: '可燃气体（MQ）', scene: '打火机放气靠近（勿点燃）', kind: 'sensor' },
+  { id: 'mic', name: '声音强度（麦克风）', scene: '正常说话 / 大声喊', kind: 'sensor' },
+  { id: 'light', name: '光照', scene: '开灯 / 关灯 / 遮挡', kind: 'sensor' },
+  { id: 'temp', name: '温度', scene: '手捂探头 / 靠近热源', kind: 'sensor' },
+  { id: 'humid', name: '湿度', scene: '对着探头哈气', kind: 'sensor' },
+  { id: 'voice', name: '扬声器/语音', scene: '触发报警听取提示音', kind: 'output' },
+  { id: 'key', name: '按键', scene: '短按 / 长按 3 秒', kind: 'input' },
+  { id: 'report', name: '联网与上报', scene: '断电重连、观察后台是否收到', kind: 'net' },
+  { id: 'power', name: '断电与恢复', scene: '拔电 10 秒再上电', kind: 'net' },
+];
+
+const TEST_RESULTS = ['ok', 'noise', 'miss', 'value'];
+const RESULT_LABEL = { ok: '正常', noise: '误报', miss: '漏报', value: '数值不对' };
+
+function wirelessTests() {
+  return Array.isArray(settings[TEST_KEY]) ? settings[TEST_KEY] : [];
+}
+
+/** 根据记录里的失败项给整改建议（规则明确，可追溯到具体条目） */
+function testAdvice(items) {
+  const by = {};
+  items.forEach((it) => { (by[it.item] = by[it.item] || []).push(it); });
+  const advice = [];
+  Object.keys(by).forEach((itemId) => {
+    const list = by[itemId];
+    const info = TEST_ITEMS.find((x) => x.id === itemId) || { name: itemId };
+    const miss = list.filter((x) => x.result === 'miss').length;
+    const noise = list.filter((x) => x.result === 'noise').length;
+    const value = list.filter((x) => x.result === 'value').length;
+    const ok = list.filter((x) => x.result === 'ok').length;
+    if (!miss && !noise && !value) return;
+    const parts = [];
+    if (miss) parts.push('漏报 ' + miss + ' 次');
+    if (noise) parts.push('误报 ' + noise + ' 次');
+    if (value) parts.push('数值异常 ' + value + ' 次');
+    let fix = '';
+    if (miss && !noise) fix = '判定条件偏严：放宽阈值或缩短确认时间（如 presence 的 holdMs 从 3000 降到 1500），并确认探头供电与接线';
+    else if (noise && !miss) fix = '判定条件偏松：加大去抖与连续命中次数，或抬高触发阈值（如 gas 的 mq 阈值上调 10%~15%）';
+    else if (miss && noise) fix = '判定区间过窄：存在「该响不响、不该响乱响」，需重新定标阈值上下限，并检查传感器安装位置与遮挡';
+    else if (value) fix = '读数与现场不符：优先怀疑校准与接线（供电电压、探头接触），再核对上报字段单位';
+    advice.push({
+      item: itemId,
+      name: info.name,
+      scene: info.scene || '',
+      failCount: miss + noise + value,
+      okCount: ok,
+      detail: parts.join('，'),
+      fix,
+      level: (miss + noise + value) >= 2 ? 'high' : 'mid',
+    });
+  });
+  return advice.sort((a, b) => b.failCount - a.failCount);
+}
+
+/** 测试列表（概要，不带完整条目） */
+app.get('/api/tests', (req, res) => {
+  const device = String(req.query.device || '');
+  const list = wirelessTests()
+    .filter((t) => !device || t.device === device)
+    .slice()
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))
+    .map((t) => ({
+      id: t.id, device: t.device, deviceName: t.deviceName, date: t.date,
+      tester: t.tester, startedAt: t.startedAt, finishedAt: t.finishedAt || 0,
+      status: t.status, count: (t.items || []).length,
+      failCount: (t.items || []).filter((i) => i.result !== 'ok').length,
+    }));
+  res.json({ ok: true, total: list.length, tests: list, items: TEST_ITEMS });
+});
+
+/** 新建一场测试 */
+app.post('/api/tests', (req, res) => {
+  const b = req.body || {};
+  const device = String(b.device || '').trim();
+  if (!device) return res.status(400).json({ error: '请选择设备' });
+  const d = store.getDevice(device);
+  if (!d) return res.status(400).json({ error: '设备不存在：' + device });
+  const tester = String(b.tester || '').trim();
+  if (!tester) return res.status(400).json({ error: '请填写测试人员' });
+  const date = String(b.date || '').slice(0, 10) || fmtDay(Date.now());
+  const rec = {
+    id: 'T' + Date.now().toString(36).toUpperCase(),
+    device,
+    deviceName: (d.meta && d.meta.name) || '',
+    date,
+    tester,
+    startedAt: Date.now(),
+    finishedAt: 0,
+    status: 'running',
+    items: [],
+  };
+  settings[TEST_KEY] = [rec].concat(wirelessTests()).slice(0, 100);
+  store.saveSettings(settings);
+  res.json({ ok: true, test: rec, items: TEST_ITEMS });
+});
+
+/** 追加一条验证记录 */
+app.post('/api/tests/:id/items', (req, res) => {
+  const t = wirelessTests().find((x) => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: '测试记录不存在' });
+  if (t.status === 'done') return res.status(400).json({ error: '这场测试已结束，不能再追加' });
+  const b = req.body || {};
+  const item = String(b.item || '');
+  if (!TEST_ITEMS.some((x) => x.id === item)) return res.status(400).json({ error: '未知测试项' });
+  const result = String(b.result || '');
+  if (!TEST_RESULTS.includes(result)) return res.status(400).json({ error: '结果只能是 正常/误报/漏报/数值不对' });
+  t.items.push({
+    at: Date.now(), item, result,
+    value: String(b.value || '').slice(0, 60),
+    note: String(b.note || '').slice(0, 300),
+  });
+  store.saveSettings(settings);
+  res.json({ ok: true, test: t, advice: testAdvice(t.items) });
+});
+
+/** 结束一场测试并给出建议 */
+app.post('/api/tests/:id/finish', (req, res) => {
+  const t = wirelessTests().find((x) => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: '测试记录不存在' });
+  t.status = 'done';
+  t.finishedAt = Date.now();
+  store.saveSettings(settings);
+  res.json({ ok: true, test: t, advice: testAdvice(t.items) });
+});
+
+/** 单场详情 */
+app.get('/api/tests/:id', (req, res) => {
+  const t = wirelessTests().find((x) => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: '测试记录不存在' });
+  res.json({ ok: true, test: t, advice: testAdvice(t.items), allItems: TEST_ITEMS });
+});
+
+/** 删除一场（谨慎操作，需显式确认参数） */
+app.delete('/api/tests/:id', (req, res) => {
+  if (String(req.query.confirm || '') !== '1') return res.status(400).json({ error: '需要 confirm=1 才删除' });
+  settings[TEST_KEY] = wirelessTests().filter((x) => x.id !== req.params.id);
+  store.saveSettings(settings);
+  res.json({ ok: true });
+});
 
 const TUNING_KEY = 'tuningLibrary';
 function tuningLibrary() {
