@@ -321,7 +321,23 @@ function handleAck(device, msg) {
   console.log(`[ACK] ${device} ${cmd} ok=${ok}${msg.detail ? ' ' + msg.detail : ''}`);
 }
 
+/** 垃圾状态载荷告警节流（公共 broker 上可能有人往同名主题乱发，避免刷日志） */
+const badStatusWarnAt = {};
+function warnBadStatus(device, reason, msg) {
+  const now = Date.now();
+  if (now - (badStatusWarnAt[device] || 0) < 60000) return;
+  badStatusWarnAt[device] = now;
+  console.warn(`[MQTT] 丢弃${reason}（${device}）：${JSON.stringify(msg).slice(0, 100)}`);
+}
+
 function handleStatus(device, msg) {
+  // 载荷校验：任何人都能往 broker 的同名主题发消息，垃圾载荷/冒名心跳不能污染设备状态
+  // （典型症状：收到 {"online":0} 这类载荷后设备被永久显示"在线"，状态与真实完全脱钩）
+  if (!msg || typeof msg !== 'object') return;
+  if (msg.id != null && String(msg.id) !== device) return warnBadStatus(device, '冒名心跳（载荷 id 与主题不符）', msg);
+  const recognizable = msg.state != null || msg.battery != null || msg.fw != null || msg.sensors != null;
+  if (!recognizable) return warnBadStatus(device, '无法识别的状态载荷', msg);
+
   const now = Date.now();
   const prev = store.getDevice(device);
   const wasOnline = prev ? !!prev.online : false;
@@ -388,14 +404,16 @@ function handleDiag(device, msg) {
   broadcast({ type: 'diag', device, data: { seq: msg.seq, items: msg.items || [], ...analysis } });
 }
 
-/** 心跳超时离线扫描（每 10 秒） */
+/** 心跳超时离线扫描（每 5 秒；固件常态心跳 60 秒） */
 setInterval(() => {
   const now = Date.now();
   const map = store.getDevices();
   let changed = false;
   for (const id of Object.keys(map)) {
     const d = map[id];
-    if (d.online && now - d.lastTs > config.offlineAfterMs) {
+    // lastTs 缺失（老数据/异常记录）时按 0 处理，否则 now-NaN 比较恒为 false → 永不判离线
+    const lastTs = Number(d.lastTs) || 0;
+    if (d.online && now - lastTs > config.offlineAfterMs) {
       store.upsertDevice({ id, online: false });
       store.addEvent({ device: id, type: 'device', level: 'warn', text: '设备离线（心跳超时）', ts: now });
       broadcast({ type: 'device_update', device: id, data: store.getDevice(id) });

@@ -48,7 +48,7 @@ const int   MQTT_PORT     = 1883;
 /* 设备身份：留空 = 由芯片 MAC 自动派生唯一 ID（量产推荐，免逐台改代码）。
  * 需要固定为后台白名单里的 A001 时，填 "A001"。 */
 const char* DEVICE_ID_OVERRIDE = "";
-const char* TOPIC_PREFIX  = "dev/";             // 与后台 config 一致
+const char* TOPIC_PREFIX  = "xzl-kitchen/";     // 项目私有前缀：公共 broker 上他人的 dev/ 同名主题不会串入（须与后台 config 一致）
 char DEVICE_ID[24] = "XZL-000000";              // 运行时生成，全文件统一引用
 
 /* 指令签名密钥（HMAC-SHA256）。留空 = 不校验（兼容未升级的后台）。

@@ -12,6 +12,14 @@
  *   DEVMODE_TTL_SEC       开发者模式默认超时秒数（默认 1800 = 30 分钟）
  *   AI_API_KEY / AI_ENDPOINT / AI_MODEL   可选：大模型 API 增强故障分析
  */
+// 主题前缀必须以 '/' 结尾：后端靠 topic.split('/') 取设备 ID，
+// 少了斜杠会让「前缀+设备ID」粘成一段，心跳被静默丢弃（设备一直显示离线）
+function normalizePrefix(p) {
+  const s = String(p || '').trim();
+  if (!s) return 'dev/';
+  return s.endsWith('/') ? s : s + '/';
+}
+
 module.exports = {
   httpPort: Number(process.env.PORT || 3000),
 
@@ -19,7 +27,9 @@ module.exports = {
     url: process.env.MQTT_URL || 'mqtt://broker.emqx.io:1883',
     username: process.env.MQTT_USER || '',
     password: process.env.MQTT_PASS || '',
-    topicPrefix: process.env.MQTT_TOPIC_PREFIX || 'dev/',
+    // 项目私有前缀（不再是公共的 dev/）：公共 broker 上他人同名主题会串进来，
+    // 既会伪造「设备在线」，也能被伪造指令；改私有前缀即可隔离。须与固件 TOPIC_PREFIX 一致
+    topicPrefix: normalizePrefix(process.env.MQTT_TOPIC_PREFIX || 'xzl-kitchen/'),
     clientId: process.env.MQTT_CLIENT_ID || ('kitchen-admin-' + Math.random().toString(36).slice(2, 8)),
     // 指令签名密钥（HMAC-SHA256）。必须与固件 CMD_SECRET 一致：
     // 为空 = 兼容放行（不签名也不验签）；配置后固件拒绝未签名/重放指令
@@ -36,8 +46,9 @@ module.exports = {
   // 初始设备（首次启动自动注册到设备库，便于演示；页面可继续添加/删除）
   initialDevices: (process.env.INITIAL_DEVICES || 'A001,A002,A003').split(',').map((s) => s.trim()).filter(Boolean),
 
-  // 设备心跳超过该毫秒数未上报 → 判定离线
-  offlineAfterMs: Number(process.env.OFFLINE_AFTER_MS || 90000),
+  // 设备心跳：常态 60 秒一次（固件 NORMAL_INTERVAL_MS）。判离线只留 15 秒余量，
+  // 太宽会让 UI 在设备已断电后仍长时间显示「在线」（状态不真实）
+  offlineAfterMs: Number(process.env.OFFLINE_AFTER_MS || 75000),
 
   // 开发者模式默认时长（秒），超时自动关闭并通知主机恢复低功耗
   devmodeDefaultTtlSec: Number(process.env.DEVMODE_TTL_SEC || 1800),

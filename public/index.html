@@ -22,7 +22,7 @@
   .pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:20px;font-size:12px;background:var(--gray-l);color:var(--gray)}
   .pill.ok{background:var(--green-l);color:var(--green)} .pill.bad{background:var(--red-l);color:var(--red)}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--gray);display:inline-block}
-  .dot.ok{background:var(--green)} .dot.bad{background:var(--red)} .dot.live{background:var(--red);animation:blink 1s infinite}
+  .dot.ok{background:var(--green)} .dot.bad{background:var(--red)} .dot.warn{background:var(--amber)} .dot.live{background:var(--red);animation:blink 1s infinite}
   @keyframes blink{50%{opacity:.25}}
   .wrap{padding:16px 18px}
   main{max-width:1180px;margin:0 auto}
@@ -266,6 +266,40 @@ const fmtCount = (ts) => {
   const m = Math.floor(s / 60), ss = s % 60;
   return m + '分' + (ss < 10 ? '0' : '') + ss + '秒';
 };
+/* 在线状态的真实性靠「多久没同步」体现：设备 60 秒一次心跳，
+   超过 70 秒没更新就不该再让用户看到纯「在线」 */
+const fmtAgo = (iso) => {
+  if (!iso) return '—';
+  const t = new Date(iso).getTime();
+  if (!t || isNaN(t)) return '—';
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 5) return '刚刚';
+  if (s < 60) return s + ' 秒前';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + ' 分钟前';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + ' 小时前';
+  return Math.floor(h / 24) + ' 天前';
+};
+const syncText = (online, iso) => {
+  const t = iso ? new Date(iso).getTime() : 0;
+  const age = t ? (Date.now() - t) / 1000 : Infinity;
+  if (!online) return '<span class="dot"></span>离线' + (t ? ' · 最后 ' + fmtAgo(iso) : '');
+  if (age > 70) return '<span class="dot warn"></span>在线 · ' + fmtAgo(iso) + '同步（延迟偏大）';
+  return '<span class="dot ok"></span>在线 · ' + fmtAgo(iso) + '同步';
+};
+/* 定时把「X 秒前」文案刷成最新，不重建页面（避免打断正在填写的表单） */
+function updateSyncTexts() {
+  document.querySelectorAll('.dev-sync').forEach((el) => {
+    el.innerHTML = syncText(el.dataset.online === '1', el.dataset.ts || '');
+  });
+  document.querySelectorAll('.sync-tag').forEach((el) => {
+    if (el.dataset.live === '1') return;
+    el.innerHTML = syncText(el.dataset.online === '1', el.dataset.ts || '');
+  });
+}
+setInterval(updateSyncTexts, 5000);
+
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const sensorName = (k) => ({ radar: '雷达', mq: '燃气', sht: '温湿度', mic: '声敏', light: '光敏', battery: '电池', led: 'LED 灯', speaker: '喇叭' }[k] || k);
 const stShort = (s) => ({ ok: '正常', err: '故障', warn: '异常', pass: '通过' }[s] || s);
@@ -397,7 +431,7 @@ function devCard(d) {
     '<span class="badge">FW ' + (d.fw || '—') + '</span>' +
     (d.workflowVersion != null ? '<span class="badge">WF v' + d.workflowVersion + '</span>' : '') +
     live + wfBadge + '</div>' +
-    '<div class="dev-sync">' + (d.online ? '<span class="dot ok"></span> 在线 · 最后同步 ' + fmtTime(d.lastSyncAt) : '<span class="dot"></span> 离线') + '</div>' +
+    '<div class="dev-sync" data-online="' + (d.online ? 1 : 0) + '" data-ts="' + esc(d.lastSyncAt || '') + '">' + syncText(d.online, d.lastSyncAt) + '</div>' +
     '<div class="dev-ops">' +
     '<button class="devop" data-op="poweroff">关机</button>' +
     '<button class="devop" data-op="reboot">重启</button>' +
@@ -437,8 +471,8 @@ function renderMain() {
   const html =
     '<div class="topbar"><button id="btn-back">← 返回全部设备</button>' +
     '<h2>' + esc(d.id) + (d.name ? ' · ' + esc(d.name) : '') + '</h2>' +
-    '<span class="sync-tag ' + (live ? 'live' : '') + '">' +
-    (live ? '<span class="dot live"></span>实时（开发者模式）' : (online ? '最后同步 ' + fmtTime(d.lastSyncAt) : '<span class="dot"></span>离线')) +
+    '<span class="sync-tag ' + (live ? 'live' : '') + '" data-live="' + (live ? 1 : 0) + '" data-online="' + (online ? 1 : 0) + '" data-ts="' + esc(d.lastSyncAt || '') + '">' +
+    (live ? '<span class="dot live"></span>实时（开发者模式）' : syncText(online, d.lastSyncAt)) +
     '</span>' +
     '<button id="btn-edit">编辑信息</button>' +
     '<button class="danger" id="btn-del">删除设备</button></div>' +
@@ -1711,7 +1745,12 @@ function connectWS() {
         }
         // 顶部状态栏（同步时间/离线/实时模式）在所有 tab 下实时更新；开发者模式样式一并保留
         const st = $('.sync-tag');
-        if (st) st.innerHTML = cur && cur.devmode ? '<span class="dot live"></span>实时（开发者模式）' : (d.online ? '最后同步 ' + fmtTime(d.lastSyncAt) : '<span class="dot"></span>离线');
+        if (st) {
+          st.dataset.online = d.online ? '1' : '0';
+          st.dataset.ts = d.lastSyncAt || '';
+          st.dataset.live = (cur && cur.devmode) ? '1' : '0';
+          st.innerHTML = (cur && cur.devmode) ? '<span class="dot live"></span>实时（开发者模式）' : syncText(d.online, d.lastSyncAt);
+        }
         // 按当前 tab 局部刷新：只读 tab 更新内容；可编辑 tab（参数/语音/WiFi/OTA/自检）不重建页面，
         // 避免设备心跳把用户正在填写的表单清空并踢回概览页（输入完整保留）
         const t = curTab();
@@ -1978,6 +2017,13 @@ async function boot() {
 }
 boot();
 setInterval(loadDevices, 15000);
+// 手机切后台/锁屏后 WS 会断、页面数据会凝固：回到前台立刻拉一次真实状态并补连实时通道
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !me) return;
+  updateSyncTexts();
+  loadDevices();
+  if (!ws || ws.readyState === WebSocket.CLOSED) connectWS();
+});
 </script>
 </body>
 </html>
