@@ -20,6 +20,7 @@ const { WebSocketServer } = require('ws');
 
 const config = require('./config');
 const store = require('./store');
+const insights = require('./insights');
 const { analyzeDiag } = require('./diag');
 const { DEFAULT_WORKFLOW, DEFAULT_AI, sanitizeWorkflow, sanitizeAI, runWorkflow } = require('./workflow');
 
@@ -171,7 +172,7 @@ function loginFail(account) {
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 // 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
-const APP_VERSION = '1.0.3';
+const APP_VERSION = '1.0.4';
 
 // 上行数据签名密钥：与固件 dev_secret 同值。未设置时进入兼容模式（只记录不拦截），
 // 设置 DEV_SECRET_STRICT=1 后才强制丢弃未签名/签名错误的上报。
@@ -894,6 +895,92 @@ app.get('/api/firmwares/:id/download', (req, res) => {
 });
 
 // 事件历史（limit 钳制 1~2000，防超大请求拖慢排序）
+/* ---------------- 用户数据库：主机使用情况分析 ---------------- */
+/** 总览：设备清单 + 事件分布（小时/天）+ 数据覆盖说明 */
+app.get('/api/insights/overview', (req, res) => {
+  const days = Math.min(30, Math.max(1, parseInt(req.query.days, 10) || 7));
+  res.json(insights.buildOverview(store, days));
+});
+
+/** 单机明细：事件时间线、活跃时段、离线间隔（由事件间隔推断） */
+app.get('/api/insights/devices/:id', (req, res) => {
+  const d = insights.buildDeviceDetail(store, req.params.id, 200);
+  if (!d) return res.status(404).json({ error: '设备不存在' });
+  res.json(d);
+});
+
+/** 由真实数据生成的调试建议（每条都能指回具体事件） */
+app.get('/api/insights/suggestions', (req, res) => {
+  res.json(insights.buildSuggestions(store, 7));
+});
+
+/** 云端调参知识库：每次下发过的调试动作都留档，便于回溯「改了什么、影响了几台」 */
+const TUNING_KEY = 'tuningLibrary';
+function tuningLibrary() {
+  return Array.isArray(settings[TUNING_KEY]) ? settings[TUNING_KEY] : [];
+}
+
+app.get('/api/insights/library', (req, res) => {
+  res.json({ ok: true, entries: tuningLibrary().slice(-50).reverse() });
+});
+
+/**
+ * 把一条调试动作真正下发到主机（走与手动操作同一条 MQTT 通道，不是模拟）。
+ * body: { action: 'diag' | 'devmode-on' | 'devmode-off' | 'reboot' | 'poweron', targets?: 'all' | [id] }
+ */
+app.post('/api/insights/apply', (req, res) => {
+  const action = String(req.body.action || '');
+  const ALLOWED = {
+    diag: (id) => ({ cmd: 'diag' }),
+    'devmode-on': (id) => ({ cmd: 'devmode', on: true, ttl: 1800 }),
+    'devmode-off': (id) => ({ cmd: 'devmode', on: false }),
+    reboot: (id) => ({ cmd: 'reboot' }),
+    poweron: (id) => ({ cmd: 'poweron' }),
+  };
+  if (!ALLOWED[action]) return res.status(400).json({ error: '不支持的调试动作' });
+  if (!mqttClient || !mqttClient.connected) return res.status(503).json({ error: '消息通道未连接，无法下发' });
+
+  const map = store.getDevices();
+  const all = Object.keys(map);
+  let targets = all;
+  if (Array.isArray(req.body.targets) && req.body.targets.length) {
+    targets = req.body.targets.filter((id) => map[id]);
+  }
+  if (!targets.length) return res.status(400).json({ error: '没有可下发的主机' });
+
+  const results = targets.map((id) => {
+    const online = publishCmd(id, ALLOWED[action](id));
+    store.addEvent({
+      device: id, type: 'params', level: 'info',
+      text: '云端调参：' + action + (online ? '（已下发，主机在线）' : '（已下发，主机离线待执行）'),
+      ts: Date.now(),
+    });
+    return { id, online, note: online ? '已下发' : '离线，上线后执行' };
+  });
+
+  const entry = {
+    at: Date.now(),
+    atText: insights.fmtLocal(Date.now()),
+    action,
+    targets: targets.length,
+    onlineTargets: results.filter((r) => r.online).length,
+    by: (req.user && req.user.account) || 'admin',
+  };
+  settings[TUNING_KEY] = tuningLibrary().concat([entry]).slice(-200);
+  store.saveSettings(settings);
+  broadcast({ type: 'insights', event: 'tuning', entry });
+
+  res.json({
+    ok: true,
+    action,
+    applied: results.length,
+    online: entry.onlineTargets,
+    results,
+    warn: entry.onlineTargets < results.length ? `${results.length - entry.onlineTargets} 台主机当前离线，指令已发出但要在设备上线后才执行` : null,
+memo: '本次动作已写入云端调参知识库',
+  });
+});
+
 app.get('/api/events', (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 2000);
   res.json({ events: store.listEvents(req.query.device || null, limit) });
@@ -1087,17 +1174,26 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, version: APP_VERSION, mqtt: mqttClient && mqttClient.connected, devices: Object.keys(store.getDevices()).length });
 });
 
+/* 安装包下载：必须由后台自己给，不能经过图片 CDN ——
+ * 图片 CDN 会把文件重定向成 xxx.exe~tplv-xxx-image.image，浏览器按 image 保存，双击装不上。
+ * res.download 会写 Content-Disposition（含中文文件名），浏览器拿到的就是可执行的 .exe。 */
+app.get('/app/xzl-kitchen-setup.exe', (req, res) => {
+  res.download(path.join(__dirname, 'public', 'app', 'xzl-kitchen-setup.exe'), '小知了厨房卫士-' + APP_VERSION + '-电脑版.exe');
+});
+app.get('/app/xzl-kitchen.apk', (req, res) => {
+  res.download(path.join(__dirname, 'public', 'app', 'xzl-kitchen.apk'), '小知了厨房卫士-' + APP_VERSION + '-安卓版.apk');
+});
+
 /* 客户端版本与升级来源：客户端 UA 里带 XZLKitchenPC/x.x.x 或 XZLKitchenApp/x.x.x，
  * 页面据此比较版本并在程序内提示升级。地址走环境变量，发版时不用改代码。 */
 const APP_RELEASE = {
   windows: {
     version: process.env.APP_EXE_VERSION || APP_VERSION,
-    url: process.env.APP_EXE_URL || 'https://aka.doubaocdn.com/s/gdldmDIj4n',
+    url: process.env.APP_EXE_URL || '/app/xzl-kitchen-setup.exe',
   },
   android: {
     version: process.env.APP_APK_VERSION || APP_VERSION,
-    // 必须给绝对外链：相对地址在同域内打开会被壳当网页加载，不会触发下载
-    url: process.env.APP_APK_URL || 'https://aka.doubaocdn.com/s/5GaKgmIyEi',
+    url: process.env.APP_APK_URL || '/app/xzl-kitchen.apk',
   },
 };
 app.get('/api/app/version', (req, res) => {

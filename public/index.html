@@ -228,6 +228,58 @@
   padding:9px 18px;font-size:13px;color:#92400e;position:sticky;top:0;z-index:6}
 .upbar button{background:#b45309;color:#fff;border:0;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer}
 .upbar .later{background:transparent;color:#92400e;text-decoration:underline;padding:6px 4px}
+
+/* ===== 用户数据库 ===== */
+.ins-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.ins-head h2{font-size:17px;margin:0}
+.ins-head span{font-size:12.5px;color:var(--sub)}
+.ins-kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px}
+.ins-kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.ins-kpi .k{font-size:12px;color:var(--sub)}
+.ins-kpi .v{font-size:22px;font-weight:600;line-height:1.3;margin-top:2px}
+.ins-kpi .u{font-size:12px;color:var(--sub);margin-left:3px;font-weight:400}
+.ins-charts{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:12px}
+.ins-chart{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.ins-chart h3{font-size:13.5px;font-weight:600;margin:0 0 2px}
+.ins-chart p{font-size:12px;color:var(--sub);margin:0 0 8px}
+.ins-canvas{width:100%;height:210px}
+.ins-seg{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.ins-seg button{border:1px solid var(--line);background:var(--card);color:var(--sub);border-radius:8px;
+  padding:6px 14px;font-size:13px;cursor:pointer}
+.ins-seg button.on{background:var(--blue-l);border-color:var(--blue);color:var(--blue);font-weight:600}
+.ins-tablewrap{overflow-x:auto}
+table.ins-table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.ins-table th{text-align:left;font-weight:600;color:var(--sub);font-size:12.5px;padding:8px 6px;border-bottom:1px solid var(--line)}
+.ins-table td{padding:9px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+.ins-table tr:last-child td{border-bottom:0}
+.ins-h{display:inline-flex;align-items:center;justify-content:center;min-width:38px;padding:2px 7px;
+  border-radius:6px;font-size:12px;font-weight:600}
+.ins-h.good{background:var(--green-l);color:var(--green)}
+.ins-h.warn{background:var(--amber-l);color:var(--amber)}
+.ins-h.bad{background:var(--red-l);color:var(--red)}
+.ins-sug{display:flex;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
+.ins-sug:last-child{border-bottom:0}
+.ins-sug .bar{width:3px;border-radius:2px;flex:0 0 3px}
+.ins-sug .bar.high{background:var(--red)} .ins-sug .bar.mid{background:var(--amber)} .ins-sug .bar.info{background:var(--blue)}
+.ins-sug .body{flex:1;min-width:0}
+.ins-sug .t{font-size:13.5px;font-weight:600;margin-bottom:3px}
+.ins-sug .b{font-size:12.5px;color:var(--sub);line-height:1.6;margin-bottom:3px}
+.ins-sug .w{font-size:12.5px;color:var(--sub);line-height:1.6;margin-bottom:6px}
+.ins-act{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ins-btn{border:1px solid var(--blue);background:var(--blue-l);color:var(--blue);border-radius:8px;
+  padding:5px 12px;font-size:12.5px;cursor:pointer}
+.ins-btn.ghost{border-color:var(--line);background:var(--card);color:var(--sub)}
+.ins-hint{font-size:12.5px;color:var(--amber);background:var(--amber-l);border-radius:8px;padding:8px 10px;line-height:1.6}
+.ins-gap{font-size:12.5px;color:var(--sub);line-height:1.8}
+.ins-gap code{background:var(--gray-l);padding:1px 5px;border-radius:4px;font-size:12px}
+.ins-lib{font-size:12.5px;color:var(--sub);line-height:1.9}
+.ins-lib .row{display:flex;gap:8px;border-bottom:1px dashed var(--line);padding:5px 0}
+.ins-lib .row:last-child{border:0}
+.ins-lib .row b{color:var(--text);font-weight:600}
+@media(min-width:768px){
+  .ins-kpis{grid-template-columns:repeat(4,1fr)}
+  .ins-charts{grid-template-columns:repeat(3,1fr)}
+}
 </style>
 </head>
 <body>
@@ -237,9 +289,10 @@
   <button class="later" id="upbar-later">稍后</button>
 </div>
 <header>
-  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.3</span></h1>
+  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.4</span></h1>
   <nav class="topnav" id="topnav">
     <div class="navbtn on" data-view="devices">全部设备</div>
+    <div class="navbtn" data-view="insights">用户数据库</div>
     <div class="navbtn" data-view="flash">程序烧录</div>
     <div class="navbtn" data-view="ai">AI 与工作流</div>
     <div class="navbtn" data-view="debug">有线调试</div>
@@ -351,6 +404,7 @@ function setView(v) {
   else if (v === 'ai') renderAIPage();
   else if (v === 'debug') renderDebugPage();
   else if (v === 'users') renderUsersPage();
+  else if (v === 'insights') renderInsightsPage();
   else if (v === 'detail') {
     renderMain();
     // 详情页属于「全部设备」的功能延伸：保持顶部「全部设备」高亮
@@ -1938,6 +1992,331 @@ function changePwdModal(account, isSelf) {
     } catch (e) { msgEl.textContent = e.message; }
   };
   document.getElementById('pwd-new').focus();
+}
+
+/* ================= 用户数据库（主机使用情况分析） =================
+ * 统计口径：只算真实记录 —— 事件流 + 设备上报时间。
+ * 固件里还没有真实传感器的字段不进图表，在「数据缺口」里单独列出来，不拿常量冒充数据。
+ */
+const insState = { days: 7, data: null, sug: null, charts: {}, lib: null, detailId: null };
+
+function insEcharts() {
+  if (window.__insEchartsPromise) return window.__insEchartsPromise;
+  window.__insEchartsPromise = new Promise((resolve, reject) => {
+    if (window.echarts) return resolve(window.echarts);
+    const sc = document.createElement('script');
+    sc.src = 'https://fastly.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js';
+    sc.onload = () => (window.echarts ? resolve(window.echarts) : reject(new Error('echarts 未就绪')));
+    sc.onerror = () => reject(new Error('图表库加载失败'));
+    document.head.appendChild(sc);
+  });
+  return window.__insEchartsPromise;
+}
+
+function insDisposeCharts() {
+  Object.keys(insState.charts).forEach((k) => {
+    try { insState.charts[k].dispose(); } catch (e) {}
+    delete insState.charts[k];
+  });
+}
+
+async function loadInsights(reloadSuggestions) {
+  insState.data = await api('/api/insights/overview?days=' + insState.days).catch(() => null);
+  if (reloadSuggestions || !insState.sug) insState.sug = await api('/api/insights/suggestions').catch(() => null);
+  insState.lib = await api('/api/insights/library').catch(() => null);
+}
+
+function renderInsightsPage() {
+  const main = $('#main');
+  main.innerHTML =
+    '<div class="ins-head"><h2>用户数据库</h2>' +
+      '<span>统计口径：设备真实事件流与上报时间，不含未接入的传感器读数</span></div>' +
+    '<div class="ins-seg" id="ins-seg">' +
+      '<button data-d="1">近 24 小时</button><button data-d="7" class="on">近 7 天</button><button data-d="30">近 30 天</button>' +
+      '<button id="ins-refresh" style="margin-left:auto">刷新</button>' +
+    '</div>' +
+    '<div id="ins-body"><div class="empty">正在汇总…</div></div>';
+  $('#ins-seg').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.id === 'ins-refresh') { loadInsights(true).then(drawInsights); return; }
+    if (!b.dataset.d) return;
+    insState.days = Number(b.dataset.d);
+    $('#ins-seg').querySelectorAll('button[data-d]').forEach((x) => x.classList.toggle('on', x === b));
+    loadInsights(false).then(drawInsights);
+  });
+  loadInsights(true).then(drawInsights);
+}
+
+function insKpi(label, value, unit, color) {
+  return '<div class="ins-kpi"><div class="k">' + label + '</div><div class="v"' +
+    (color ? ' style="color:' + color + '"' : '') + '>' + value +
+    (unit ? '<span class="u">' + unit + '</span>' : '') + '</div></div>';
+}
+
+function drawInsights() {
+  const body = $('#ins-body');
+  if (!body) return;
+  const d = insState.data;
+  if (!d || !d.ok) {
+    body.innerHTML = '<div class="card"><div class="empty">数据加载失败，请点刷新重试</div></div>';
+    return;
+  }
+  const t = d.totals;
+  body.innerHTML =
+    '<div class="ins-kpis">' +
+      insKpi('主机总数', t.devices) +
+      insKpi('当前在线', t.online, '台', t.online ? 'var(--green)' : 'var(--red)') +
+      insKpi('近 24 小时事件', t.events24h) +
+      insKpi('近 24 小时安全事件', t.security24h, '条', t.security24h ? 'var(--red)' : 'var(--sub)') +
+    '</div>' +
+    '<div class="ins-charts">' +
+      '<div class="ins-chart"><h3>事件类型分布</h3><p>近 ' + d.windowDays + ' 天真实事件归类</p><div class="ins-canvas" id="ins-c-type"></div></div>' +
+      '<div class="ins-chart"><h3>主机活跃时段</h3><p>近 24 小时按小时统计（当地时间）</p><div class="ins-canvas" id="ins-c-hour"></div></div>' +
+      '<div class="ins-chart"><h3>近 ' + d.windowDays + ' 天趋势</h3><p>每日事件量；最多回溯 5000 条记录窗口</p><div class="ins-canvas" id="ins-c-day"></div></div>' +
+    '</div>' +
+    '<div class="card"><h2 style="margin:0 0 4px;font-size:15px">主机使用情况</h2>' +
+      '<p class="muted" style="margin:0 0 8px;font-size:12.5px">健康度 = 在线状态 + 24 小时有无上报 + 24 小时安全事件，三项扣分制。点一行看单机明细。</p>' +
+      '<div class="ins-tablewrap"><table class="ins-table">' +
+        '<colgroup><col style="width:15%"><col style="width:9%"><col style="width:9%"><col style="width:20%"><col style="width:13%"><col style="width:11%"><col style="width:13%"></colgroup>' +
+        '<thead><tr><th>主机</th><th>健康度</th><th>状态</th><th>最后上报</th><th>24h 事件</th><th>安全</th><th>固件</th></tr></thead><tbody>' +
+        (d.devices.length ? d.devices.map(insRow).join('') : '<tr><td colspan="7"><span class="muted">还没有主机</span></td></tr>') +
+      '</tbody></table></div>' +
+      '<div id="ins-detail"></div></div>' +
+    '<div id="ins-sug-wrap"></div>' +
+    '<div id="ins-tune"></div>' +
+    '<div id="ins-gap-wrap"></div>' +
+    '<div id="ins-lib-wrap"></div>';
+  body.querySelector('tbody').addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-id]');
+    if (tr) insShowDetail(tr.dataset.id);
+  });
+  drawInsCharts();
+  drawInsSuggestions();
+  drawInsTuning();
+  drawInsGap();
+  drawInsLibrary();
+}
+
+function insRow(r) {
+  const on = r.online
+    ? '<span style="color:var(--green);font-weight:600">在线</span>'
+    : '<span style="color:var(--red);font-weight:600">离线</span>';
+  return '<tr data-id="' + esc(r.id) + '" style="cursor:pointer">' +
+    '<td><b>' + esc(r.id) + '</b>' + (r.name ? '<br><span class="muted" style="font-size:12px">' + esc(r.name) + '</span>' : '') + '</td>' +
+    '<td><span class="ins-h ' + r.healthTag + '">' + r.health + '</span></td>' +
+    '<td>' + on + '</td>' +
+    '<td>' + esc(r.lastSeen) + '</td>' +
+    '<td>' + r.events24h + '</td>' +
+    '<td>' + (r.security24h ? '<span style="color:var(--red)">' + r.security24h + '</span>' : '0') + '</td>' +
+    '<td style="font-size:12px">' + (esc(r.fw) || '—') + '</td></tr>';
+}
+
+function drawInsCharts() {
+  const d = insState.data;
+  insEcharts().then((echarts) => {
+    const axis = { axisLine: { lineStyle: { color: '#DEE3E8' } }, axisLabel: { color: '#646A73', fontSize: 11 }, splitLine: { lineStyle: { color: '#F0F2F5' } } };
+
+    const typeEl = $('#ins-c-type');
+    if (typeEl) {
+      insState.charts.type = echarts.init(typeEl);
+      const list = d.byType.filter((x) => x.count > 0);
+      insState.charts.type.setOption({
+        tooltip: { trigger: 'item', formatter: '{b}<br>{c} 条 · {d}%' },
+        legend: { bottom: 0, left: 'center', itemWidth: 9, itemHeight: 9, textStyle: { fontSize: 11, color: '#646A73' }, icon: 'circle' },
+        color: ['#2F6FE4', '#16A34A', '#D97706', '#DC2626', '#6B7280', '#7C3AED', '#0891B2', '#EA580C'],
+        series: [{
+          type: 'pie', radius: ['42%', '68%'], center: ['50%', '44%'], avoidLabelOverlap: true,
+          label: { show: false }, itemStyle: { borderColor: '#fff', borderWidth: 2 },
+          data: list.length ? list.map((x) => ({ name: x.label, value: x.count }))
+                            : [{ name: '暂无可统计事件', value: 1 }],
+        }],
+      });
+    }
+
+    const hourEl = $('#ins-c-hour');
+    if (hourEl) {
+      insState.charts.hour = echarts.init(hourEl);
+      const peak = d.byHour.reduce((a, b) => (b.count > a.count ? b : a), d.byHour[0] || { hour: 0, count: 0 });
+      insState.charts.hour.setOption({
+        grid: { left: 34, right: 8, top: 14, bottom: 24 },
+        tooltip: { trigger: 'axis', formatter: (p) => p[0].axisValue + ' 点 · ' + p[0].value + ' 条' },
+        xAxis: { type: 'category', data: d.byHour.map((x) => x.hour), ...axis, axisLabel: { color: '#646A73', fontSize: 10, interval: 3 } },
+        yAxis: { type: 'value', ...axis, minInterval: 1 },
+        series: [{
+          type: 'bar', barMaxWidth: 12, data: d.byHour.map((x) => ({
+            value: x.count,
+            itemStyle: { color: x.hour === peak.hour && peak.count > 0 ? '#2F6FE4' : '#A9C0EC', borderRadius: [3, 3, 0, 0] },
+          })),
+        }],
+      });
+    }
+
+    const dayEl = $('#ins-c-day');
+    if (dayEl) {
+      insState.charts.day = echarts.init(dayEl);
+      insState.charts.day.setOption({
+        grid: { left: 34, right: 10, top: 14, bottom: 26 },
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: d.byDay.map((x) => x.date.slice(5)), ...axis, axisLabel: { color: '#646A73', fontSize: 10 } },
+        yAxis: { type: 'value', ...axis, minInterval: 1 },
+        series: [{
+          type: 'line', smooth: false, symbolSize: 5, data: d.byDay.map((x) => x.count),
+          lineStyle: { color: '#2F6FE4', width: 2 }, itemStyle: { color: '#2F6FE4' },
+          areaStyle: { color: 'rgba(47,111,228,0.08)' },
+        }],
+      });
+    }
+  }).catch(() => {
+    ['ins-c-type', 'ins-c-hour', 'ins-c-day'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<div class="empty" style="padding-top:60px">图表库加载失败，数据见下方表格</div>';
+    });
+  });
+}
+
+function drawInsSuggestions() {
+  const wrap = $('#ins-sug-wrap');
+  if (!wrap) return;
+  const s = insState.sug;
+  const list = (s && s.suggestions) || [];
+  wrap.innerHTML = '<div class="card"><h2 style="margin:0 0 4px;font-size:15px">调试建议</h2>' +
+    '<p class="muted" style="margin:0 0 4px;font-size:12.5px">每条都由真实数据触发，后面写着依据。没依据就不生成建议。</p>' +
+    (list.length ? list.map(insSugItem).join('') : '<div class="empty">当前没有需要处理的问题</div>') + '</div>';
+  wrap.addEventListener('click', insSugClick);
+}
+
+function insSugItem(x) {
+  const sev = x.severity === 'high' ? 'high' : (x.severity === 'mid' ? 'mid' : 'info');
+  let act = '';
+  if (x.action && x.action.kind === 'cmd') {
+    act = '<button class="ins-btn" data-cmd="' + esc(x.action.cmd) + '">' + esc(x.action.label || '执行') + '</button>';
+  } else if (x.action && x.action.kind === 'link') {
+    act = '<button class="ins-btn" data-goview="' + esc(x.action.view) + '">' + esc(x.action.label || '前往') + '</button>';
+  } else if (x.action && x.action.kind === 'manual') {
+    act = '<button class="ins-btn ghost" data-manual="' + esc(x.id) + '">看操作步骤</button>' +
+          '<div class="ins-hint" id="ins-hint-' + esc(x.id) + '" hidden style="margin-top:8px">' + esc(x.action.hint || '') + '</div>';
+  }
+  return '<div class="ins-sug"><div class="bar ' + sev + '"></div><div class="body">' +
+    '<div class="t">' + esc(x.title) + '</div>' +
+    '<div class="b">依据：' + esc(x.basis) + '</div>' +
+    '<div class="w">' + esc(x.why) + '</div>' +
+    (act ? '<div class="ins-act">' + act + '</div>' : '') +
+    '</div></div>';
+}
+
+function insSugClick(e) {
+  const cmdBtn = e.target.closest('[data-cmd]');
+  if (cmdBtn) { insApply(cmdBtn.dataset.cmd, cmdBtn); return; }
+  const goBtn = e.target.closest('[data-goview]');
+  if (goBtn) { setView(goBtn.dataset.goview); return; }
+  const man = e.target.closest('[data-manual]');
+  if (man) {
+    const hint = document.getElementById('ins-hint-' + man.dataset.manual);
+    if (hint) hint.hidden = !hint.hidden;
+  }
+}
+
+const INS_ACTION_LABEL = {
+  diag: '对全部主机发起自检',
+  'devmode-on': '开启全部主机开发者模式（30 分钟）',
+  'devmode-off': '关闭全部主机开发者模式',
+  reboot: '重启全部主机',
+  poweron: '远程开机（全部主机）',
+};
+
+async function insApply(action, btn) {
+  if (action === 'reboot' || action === 'poweron') {
+    if (!confirm('确认对所有主机执行「' + (INS_ACTION_LABEL[action] || action) + '」？\n这会真实下发到设备，不是演练。')) return;
+  }
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '下发中…'; }
+  try {
+    const r = await api('/api/insights/apply', { method: 'POST', body: JSON.stringify({ action, targets: 'all' }) });
+    let msg = '已下发到 ' + r.applied + ' 台主机，其中 ' + r.online + ' 台在线';
+    if (r.warn) msg += '\n' + r.warn;
+    alert(msg);
+    await loadInsights(true);
+    drawInsights();
+  } catch (e) {
+    alert('下发失败：' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
+}
+
+function drawInsTuning() {
+  const wrap = $('#ins-tune');
+  if (!wrap) return;
+  const d = insState.data;
+  wrap.innerHTML = '<div class="card"><h2 style="margin:0 0 4px;font-size:15px">调试下发</h2>' +
+    '<p class="muted" style="margin:0 0 10px;font-size:12.5px">走的是和手动操作同一条下行通道（MQTT 指令，带签名）。下发给全部在线主机，离线的会上线后执行。每次动作都写进下面的云端调参知识库。</p>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+      '<select id="ins-action" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:#fff;min-width:220px">' +
+        '<option value="diag">发起自检（读一次设备状态）</option>' +
+        '<option value="devmode-off">关闭开发者模式</option>' +
+        '<option value="devmode-on">开启开发者模式（30 分钟）</option>' +
+        '<option value="reboot">重启主机</option>' +
+        '<option value="poweron">远程开机</option>' +
+      '</select>' +
+      '<button class="ins-btn" id="ins-apply">下发到全部主机（' + d.totals.online + ' 台在线）</button>' +
+    '</div>' +
+    '<div class="ins-lib" style="margin-top:10px">下发结果会逐台记录：主机号 / 是否在线 / 是否已执行。</div>' +
+    '</div>';
+  $('#ins-apply').onclick = () => insApply($('#ins-action').value, $('#ins-apply'));
+}
+
+function drawInsGap() {
+  const wrap = $('#ins-gap-wrap');
+  if (!wrap) return;
+  const cov = insState.data.dataCoverage;
+  wrap.innerHTML = '<div class="card"><h2 style="margin:0 0 4px;font-size:15px">数据缺口（不藏）</h2>' +
+    '<p class="muted" style="margin:0 0 8px;font-size:12.5px">' + esc(cov.note) + '</p>' +
+    '<div class="ins-gap">' +
+      '<div style="margin-bottom:6px"><b>已接入真实统计：</b>' + cov.real.map((x) => esc(x)).join('、') + '（事件类型）</div>' +
+      '<div><b>仍是占位常量、因此不参与分析：</b><br>' +
+        cov.placeholder.map((f) => '<code>' + esc(f.path) + '</code> ' + esc(f.label) + '（' + esc(f.fake) + '）').join('<br>') +
+      '</div>' +
+    '</div></div>';
+}
+
+function drawInsLibrary() {
+  const wrap = $('#ins-lib-wrap');
+  if (!wrap) return;
+  const entries = (insState.lib && insState.lib.entries) || [];
+  wrap.innerHTML = '<div class="card"><h2 style="margin:0 0 4px;font-size:15px">云端调参知识库</h2>' +
+    '<p class="muted" style="margin:0 0 8px;font-size:12.5px">存在服务器上的下发留档，最新在上。换台电脑登录也能看到改过什么。</p>' +
+    (entries.length ? '<div class="ins-lib">' + entries.map((e) =>
+      '<div class="row"><span style="flex:0 0 auto;color:var(--text)">' + esc(e.atText) + '</span>' +
+      '<b>' + esc(INS_ACTION_LABEL[e.action] || e.action) + '</b>' +
+      '<span>' + e.targets + ' 台（在线 ' + e.onlineTargets + '）</span>' +
+      '<span style="margin-left:auto">' + esc(e.by || '') + '</span></div>').join('') + '</div>'
+      : '<div class="empty">还没有下发记录</div>') + '</div>';
+}
+
+async function insShowDetail(id) {
+  const box = $('#ins-detail');
+  if (!box) return;
+  if (insState.detailId === id) { insState.detailId = null; box.innerHTML = ''; return; }
+  insState.detailId = id;
+  box.innerHTML = '<div class="card" style="margin-top:10px"><div class="empty">读取 ' + esc(id) + ' 明细…</div></div>';
+  const d = await api('/api/insights/devices/' + encodeURIComponent(id)).catch(() => null);
+  if (!d || !d.ok) { box.innerHTML = '<div class="card" style="margin-top:10px"><div class="empty">读取失败</div></div>'; return; }
+  const gaps = d.gaps.length
+    ? d.gaps.map((g) => '<div class="row"><span>' + esc(g.from) + ' → ' + esc(g.to) + '</span><span style="margin-left:auto">' + g.minutes + ' 分钟无上报</span></div>').join('')
+    : '<div class="muted">窗口内没有超过 10 分钟的断档</div>';
+  const evs = d.events.map((e) =>
+    '<div class="row"><span style="flex:0 0 auto;color:var(--sub)">' + esc(e.at) + '</span>' +
+    '<b style="flex:0 0 auto">' + esc(e.label) + '</b><span>' + esc(e.text) + '</span></div>').join('');
+  box.innerHTML = '<div class="card" style="margin-top:10px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+      '<h3 style="margin:0;font-size:14px">' + esc(d.device.id) + ' 单机明细</h3>' +
+      '<span class="muted" style="font-size:12.5px">在线 ' + (d.device.online ? '是' : '否') + ' · 最后上报 ' + esc(d.device.lastSeen) + ' · 固件 ' + (esc(d.device.fw) || '—') + '</span></div>' +
+    '<h3 style="margin:12px 0 6px;font-size:13px">离线间隔（由事件间隔推断）</h3>' +
+    '<div class="ins-lib">' + gaps + '</div>' +
+    '<h3 style="margin:12px 0 6px;font-size:13px">最近事件（' + d.events.length + ' 条）</h3>' +
+    '<div class="ins-lib" style="max-height:280px;overflow:auto">' + (evs || '<div class="muted">暂无事件</div>') + '</div>' +
+    '<p class="muted" style="margin:10px 0 0;font-size:12px">传感器快照当前为固件占位值，未在此展示，避免误读。</p>' +
+    '</div>';
 }
 
 /* 账号管理页（仅管理员） */
