@@ -107,7 +107,7 @@ unsigned long devmodeUntil = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long bootTs = 0;
 bool poweredOff = false; // 软件关机（保留 MQTT 监听，可远程开机）
-String fwVersion = "1.3.0";   // 雷达帧协议修复 + OTA 保活，属行为变更，必须与旧版可区分
+String fwVersion = "1.3.1";   // 雷达帧协议修复 + OTA 保活，属行为变更，必须与旧版可区分
 // 型号标识：后台收到后自动识别设备型号（人工设置过的不被覆盖）
 const char* MODEL_CODE = "ZILO-WA-V1";
 
@@ -982,7 +982,18 @@ void radarPoll() {
   if (sen.radarLastMs == 0 || millis() - sen.radarLastMs > 3000UL) sen.radarOk = false;
 }
 
-/* SHT3X：I2C 单次测量，失败即返回 false（由自检报 T1） */
+/* SHT3X 的 CRC8：多项式 0x31、初值 0xFF，覆盖每 2 字节数据 */
+static uint8_t sht3xCrc(uint8_t a, uint8_t b) {
+  uint8_t crc = 0xFF;
+  uint8_t d[2] = {a, b};
+  for (int i = 0; i < 2; i++) {
+    crc ^= d[i];
+    for (int k = 0; k < 8; k++) crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x31) : (uint8_t)(crc << 1);
+  }
+  return crc;
+}
+
+/* SHT3X：I2C 单次测量，CRC 或量程异常即返回 false（由自检报 T1） */
 bool sht3xRead() {
   Wire.beginTransmission(SHT3X_ADDR);
   Wire.write(0x2C); Wire.write(0x06);                  // 高重复性、无时钟拉伸
@@ -991,10 +1002,17 @@ bool sht3xRead() {
   if (Wire.requestFrom((int)SHT3X_ADDR, 6) != 6) return false;
   uint8_t b[6];
   for (int i = 0; i < 6; i++) b[i] = (uint8_t)Wire.read();
+  // SHT3X 每 2 字节数据后跟 1 字节 CRC8（多项式 0x31）。不校验 CRC 时，
+  // I2C 偶发噪声会让温度乱跳 1~2℃，而做饭判定正是"2 分钟内升温≥1℃"→ 会误判开始做饭
+  if (sht3xCrc(b[0], b[1]) != b[2]) return false;
+  if (sht3xCrc(b[3], b[4]) != b[5]) return false;
   uint16_t rt = ((uint16_t)b[0] << 8) | b[1];
   uint16_t rh = ((uint16_t)b[3] << 8) | b[4];
-  sen.tC   = -45.0f + 175.0f * (float)rt / 65535.0f;
-  sen.hPct = 100.0f * (float)rh / 65535.0f;
+  float t = -45.0f + 175.0f * (float)rt / 65535.0f;
+  float h = 100.0f * (float)rh / 65535.0f;
+  if (t < -40.0f || t > 125.0f || h < 0.0f || h > 100.0f) return false;  // 落在量程外一律当无效
+  sen.tC = t;
+  sen.hPct = h;
   return true;
 }
 

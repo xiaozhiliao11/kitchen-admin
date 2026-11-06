@@ -187,7 +187,7 @@ function loginFail(account) {
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 // 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
-const APP_VERSION = '1.1.2';
+const APP_VERSION = '1.1.3';
 
 // 上行数据签名密钥：与固件 dev_secret 同值。未设置时进入兼容模式（只记录不拦截），
 // 设置 DEV_SECRET_STRICT=1 后才强制丢弃未签名/签名错误的上报。
@@ -371,6 +371,13 @@ function signCmd(device, payload) {
 }
 
 function publishCmd(device, payload) {
+  // 统一兜底：固件 MQTT 接收缓冲 2048，报文过大时 PubSubClient 会丢弃并断链，
+  // 表现为"后台显示下发成功、设备毫无反应" —— 宁可在这里拦住并留痕
+  const outLen = Buffer.byteLength(JSON.stringify(signCmd(device, payload)), 'utf8');
+  if (outLen > 1500) {
+    store.addEvent({ device, type: 'cmd', level: 'error', text: '指令报文 ' + outLen + ' 字节超过设备接收缓冲，已阻止下发', ts: Date.now() });
+    return false;
+  }
   const dev = store.getDevice(device);
   const online = mqttClient && mqttClient.connected && dev && !!dev.online;
   mqttClient.publish(PREFIX + device + '/cmd', JSON.stringify(signCmd(device, payload)), { qos: 1 });
@@ -1418,6 +1425,11 @@ app.post('/api/devices/:id/voice', deviceParam, (req, res) => {
     trimmed[k] = s;
   }
   if (!Object.keys(trimmed).length) return res.status(400).json({ error: '语音话术不能为空' });
+  // 单条限 80 字还不够：中文 UTF-8 每字 3 字节，多条叠加会超过固件 2048 的 MQTT 接收缓冲
+  const rawLen = Buffer.byteLength(JSON.stringify({ cmd: 'set_voice', voice: trimmed }), 'utf8');
+  if (rawLen > 1400) {
+    return res.status(400).json({ error: `话术合计 ${rawLen} 字节，超过 1400 字节上限，请精简后再下发` });
+  }
   publishCmd(req.deviceId, { cmd: 'set_voice', voice: trimmed });
   store.addEvent({ device: req.deviceId, type: 'voice', level: 'info', text: '已下发语音话术', ts: Date.now() });
   res.json({ ok: true, voice: trimmed, warn: offlineWarn(req.deviceId) });
