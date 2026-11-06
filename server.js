@@ -214,6 +214,8 @@ const AUTH_EXEMPT = new Set(['/api/health', '/api/auth/login']);
 app.use('/api', (req, res, next) => {
   const p = (req.originalUrl || req.url || '').split('?')[0];
   if (AUTH_EXEMPT.has(p)) return next();
+  // 固件下载放行到接口内自行判定：允许「有效登录令牌」或「带过期的签名参数」（设备 OTA 无登录态）
+  if (/^\/api\/firmwares\/[^/]+\/download$/.test(p)) return next();
   // 只认请求头，不接受 ?token=（URL 里的令牌会进访问日志、浏览器历史、截图，极易泄露）
   const u = verifyToken(req.get('X-Admin-Token') || '');
   if (!u) return res.status(401).json({ error: '未登录或登录已失效，请重新登录' });
