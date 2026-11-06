@@ -81,6 +81,28 @@ function signToken(account, role) {
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   return payload + '.' + sig;
 }
+/* 固件下载链接签名：让「知道 id」不再等于「能拿到文件」。
+ * 设备 OTA 无法携带登录令牌，所以用带过期时间的签名链接代替匿名开放。 */
+const FW_URL_SECRET = process.env.FW_URL_SECRET || process.env.SESSION_SECRET || '';
+function fwUrlSig(id, exp) {
+  if (!FW_URL_SECRET) return '';
+  return crypto.createHmac('sha256', FW_URL_SECRET).update(id + '|' + exp).digest('hex').slice(0, 32);
+}
+function fwUrlOk(id, q) {
+  if (!FW_URL_SECRET) return false;
+  const exp = Number(q && q.e), k = String((q && q.k) || '');
+  if (!Number.isFinite(exp) || exp < Date.now() || !k) return false;
+  const expect = fwUrlSig(id, exp);
+  const a = Buffer.from(k), b = Buffer.from(expect);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+/* 生成可直接交给设备/浏览器的签名下载地址（默认 30 分钟有效） */
+function signedFwUrl(id, baseUrl, minutes) {
+  const exp = Date.now() + (minutes || 30) * 60 * 1000;
+  const k = fwUrlSig(id, exp);
+  return (baseUrl || '') + '/api/firmwares/' + encodeURIComponent(id) + '/download?e=' + exp + (k ? '&k=' + k : '');
+}
+
 function verifyToken(token) {
   try {
     const [p, s] = String(token || '').split('.');
@@ -192,7 +214,6 @@ const AUTH_EXEMPT = new Set(['/api/health', '/api/auth/login']);
 app.use('/api', (req, res, next) => {
   const p = (req.originalUrl || req.url || '').split('?')[0];
   if (AUTH_EXEMPT.has(p)) return next();
-  if (/^\/api\/firmwares\/[^/]+\/download$/.test(p)) return next();
   // 只认请求头，不接受 ?token=（URL 里的令牌会进访问日志、浏览器历史、截图，极易泄露）
   const u = verifyToken(req.get('X-Admin-Token') || '');
   if (!u) return res.status(401).json({ error: '未登录或登录已失效，请重新登录' });
@@ -840,13 +861,25 @@ app.post('/api/firmwares/upload', express.raw({ type: '*/*', limit: '8mb' }), (r
 });
 
 // 删除固件
+// 取一个带签名的临时下载地址（已登录才可换）
+app.get('/api/firmwares/:id/link', (req, res) => {
+  if (!store.getFirmware(req.params.id)) return res.status(404).json({ error: '固件不存在' });
+  const exp = Date.now() + 30 * 60 * 1000;
+  const url = signedFwUrl(req.params.id, '', 30);
+  res.json({ ok: true, url, expiresAt: exp });
+});
+
 app.delete('/api/firmwares/:id', (req, res) => {
   if (!store.removeFirmware(req.params.id)) return res.status(404).json({ error: '固件不存在' });
   res.json({ ok: true, deleted: req.params.id });
 });
 
-// 下载固件（同时作为 OTA 下载地址）
+// 下载固件（同时作为 OTA 下载地址）：需登录令牌，或带过期的签名参数
 app.get('/api/firmwares/:id/download', (req, res) => {
+  const authed = !!verifyToken(req.get('X-Admin-Token') || '');
+  if (!authed && !fwUrlOk(req.params.id, req.query)) {
+    return res.status(401).json({ error: '需要登录，或使用带有效签名的下载链接' });
+  }
   const fw = store.getFirmware(req.params.id);
   if (!fw) return res.status(404).json({ error: '固件不存在' });
   const file = path.resolve(config.firmwareDir, fw.fileName);
@@ -907,6 +940,11 @@ app.post('/api/devices/:id/ota', deviceParam, (req, res) => {
       if (!version) version = fw.version;
       sha256 = fw.sha256 || sha256;
     }
+  }
+  if (!url && body.firmwareId && store.getFirmware(body.firmwareId)) {
+    // 未显式给地址时，用后台签发的临时签名地址（15 分钟有效，够设备下载）
+    const base = process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
+    url = base + signedFwUrl(body.firmwareId, '', 15);
   }
   if (!url || !version) return res.status(400).json({ error: '缺少 url 或 version' });
   if (!/^https?:\/\/.+/i.test(String(url))) return res.status(400).json({ error: '固件下载地址必须是 http:// 或 https:// 开头' });

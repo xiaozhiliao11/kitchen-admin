@@ -1442,7 +1442,12 @@ function renderFwList() {
       '<button data-act="del" data-id="' + f.id + '">删除</button></td></tr>').join('') + '</tbody></table>';
   box.querySelectorAll('button[data-act]').forEach((b) => b.onclick = async () => {
     const id = b.dataset.id;
-    if (b.dataset.act === 'dl') { window.open(location.origin + '/api/firmwares/' + id + '/download', '_blank'); return; }
+    if (b.dataset.act === 'dl') {
+      // 下载需先换成带签名的临时地址（固件不再允许匿名直取）
+      const r = await api('/api/firmwares/' + id + '/link').catch(() => null);
+      if (!r || !r.url) { alert('取下载地址失败，请重新登录后再试'); return; }
+      window.open(location.origin + r.url, '_blank'); return;
+    }
     if (confirm('确认删除该固件？')) {
       await api('/api/firmwares/' + id, { method: 'DELETE' });
       await loadFirmwares(); renderFwList(); const s = $('#fl-fw'); if (s) s.innerHTML = fwSelectOptions();
@@ -1598,7 +1603,8 @@ async function burnFirmware() {
   const flashSize = $('#fl-size').value;
   flLog('→ 下载固件 ' + fw.name + ' v' + fw.version + '（' + fmtSize(fw.size) + '）…');
   try {
-    const r = await fetch('/api/firmwares/' + fwId + '/download');
+    const r = await fetch('/api/firmwares/' + fwId + '/download', { headers: { 'X-Admin-Token': localStorage.getItem('xz_token') || '' } });
+    if (!r.ok) throw new Error('固件下载失败（HTTP ' + r.status + '），请重新登录后再试');
     const buf = await r.arrayBuffer();
     const data = new Uint8Array(buf);
     flLog('→ 已载入 ' + data.length + ' 字节，开始擦除并写入（地址 0x00000，Flash ' + flashSize + '）…');
@@ -1687,11 +1693,13 @@ function bindTabActions(tab) {
   }
   if (tab === 'ota') {
     const fwSel = $('#ota-fw');
-    if (fwSel) fwSel.onchange = () => {
+    if (fwSel) fwSel.onchange = async () => {
       const opt = fwSel.selectedOptions[0];
       if (opt && opt.value) {
-        $('#ota-url').value = location.origin + '/api/firmwares/' + opt.value + '/download';
         $('#ota-ver').value = opt.dataset.ver || '';
+        // 设备端无登录态，OTA 地址用后台签发的 30 分钟临时签名链接
+        const r = await api('/api/firmwares/' + opt.value + '/link').catch(() => null);
+        $('#ota-url').value = (r && r.url) ? location.origin + r.url : '';
       }
     };
     const b = $('#ota-send'); if (b) b.onclick = async () => {
