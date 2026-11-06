@@ -319,7 +319,7 @@ body.is-mobile .navbtn[data-view="debug"] { display: none !important; }
   <button class="later" id="upbar-later">稍后</button>
 </div>
 <header>
-  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.7</span></h1>
+  <h1>小知了厨房卫士后台<span class="ver" id="app-ver">v1.0.8</span></h1>
   <nav class="topnav" id="topnav">
     <div class="navbtn on" data-view="devices">全部设备</div>
     <div class="navbtn" data-view="insights">用户数据库</div>
@@ -2533,7 +2533,8 @@ function drawTestPage() {
       wtState.tests.map((t) => '<tr><td>' + esc(t.id) + '</td><td>' + esc(t.device) + '</td><td>' + esc(t.date) + '</td><td>' + esc(t.tester) +
         '</td><td>' + t.count + '</td><td>' + (t.failCount ? '<span style="color:var(--red)">' + t.failCount + '</span>' : '0') +
         '</td><td>' + (t.status === 'running' ? '<span class="badge">进行中</span>' : '已结束') +
-        '</td><td><button class="wt-open" data-id="' + esc(t.id) + '">查看</button></td></tr>').join('') + '</tbody></table>'
+        '</td><td><button class="wt-open" data-id="' + esc(t.id) + '">查看</button> ' +
+        '<button class="wt-del" data-id="' + esc(t.id) + '" data-count="' + t.count + '" style="color:var(--red)">删除</button></td></tr>').join('') + '</tbody></table>'
       : '<div class="empty">还没有测试记录。上面选设备、日期、人员，点「确认开始记录」就行。</div>') + '</div>';
 
   html += '</div>';
@@ -2590,6 +2591,22 @@ function bindTestPage() {
     } catch (e) { alert('结束失败：' + (e.message || e)); }
   };
 
+  document.querySelectorAll('.wt-del').forEach((b) => {
+    b.onclick = async (e) => {
+      e.stopPropagation();
+      const id = b.dataset.id;
+      const n = Number(b.dataset.count || 0);
+      const sure = confirm('删除这场测试记录？\n\n编号：' + id + '\n记录条数：' + n + ' 条\n\n删除后不能恢复。');
+      if (!sure) return;
+      b.disabled = true;
+      try {
+        await api('/api/tests/' + id + '?confirm=1', { method: 'DELETE' });
+        if (wtState.current && wtState.current.id === id) { wtState.current = null; wtState.advice = []; }
+        await refreshTests();
+      } catch (err) { b.disabled = false; alert('删除失败：' + (err.message || err)); }
+    };
+  });
+
   document.querySelectorAll('.wt-open').forEach((b) => {
     b.onclick = async () => {
       try {
@@ -2598,6 +2615,7 @@ function bindTestPage() {
           esc((r.allItems.find((i) => i.id === x.item) || {}).name || x.item) + '</td><td>' + RESULT_NAME(x.result) +
           '</td><td>' + (esc(x.value) || '—') + '</td><td>' + (esc(x.note) || '—') + '</td></tr>').join('');
         $('#main').innerHTML = '<div class="page-head"><h2>测试详情 ' + esc(r.test.id) + '</h2>' +
+          '<button id="wt-del2" style="color:var(--red)">删除本场</button>' +
           '<button id="wt-back">返回列表</button></div>' +
           '<div class="card"><p class="muted">' + esc(r.test.device) + ' · ' + esc(r.test.date) + ' · ' + esc(r.test.tester) +
           ' · ' + (r.test.items || []).length + ' 条</p>' +
@@ -2605,6 +2623,14 @@ function bindTestPage() {
           '</div>' + ((r.advice || []).length ? '<div class="card"><h2 style="font-size:15px">整改建议</h2>' +
           r.advice.map((a) => '<div class="wt-adv ' + a.level + '"><b>' + esc(a.name) + '</b><span class="muted"> · ' + esc(a.detail) + '</span><div>' + esc(a.fix) + '</div></div>').join('') + '</div>' : '');
         $('#wt-back').onclick = () => renderTestPage();
+        $('#wt-del2').onclick = async () => {
+          if (!confirm('删除本场测试记录？删除后不能恢复。')) return;
+          try {
+            await api('/api/tests/' + r.test.id + '?confirm=1', { method: 'DELETE' });
+            if (wtState.current && wtState.current.id === r.test.id) { wtState.current = null; wtState.advice = []; }
+            await renderTestPage();
+          } catch (err) { alert('删除失败：' + (err.message || err)); }
+        };
       } catch (e) { alert('读取失败：' + (e.message || e)); }
     };
   });
@@ -2870,14 +2896,18 @@ async function checkUpdate() {
   // 用户点过「稍后」的同一版本，本次不再弹（刷新多少次都不弹），换版本才会再提醒
   if (localStorage.getItem('xz_up_dismiss') === rel.version) { bar.style.display = 'none'; return; }
 
-  $('#upbar-text').textContent = '发现新版本 v' + rel.version + '（当前 v' + cur + '）';
+  $('#upbar-text').textContent = '发现新版本 v' + rel.version + '（当前 v' + cur + '）' +
+    (canAutoUpdate ? '' : '　·　当前程序版本较老，请下载后手动安装一次，之后就能自动更新');
   bar.style.display = 'flex';
+  const absUrl = (() => { try { return new URL(rel.url, location.href).toString(); } catch (e) { return rel.url; } })();
+  // 1.0.7 起壳才具备「自动下载+静默安装」，更老的壳不认识这个协议，会弹系统「找不到应用」
+  const canAutoUpdate = !!pc && cmpVer(cur, '1.0.7') >= 0;
+  $('#upbar-go').textContent = canAutoUpdate ? '立即下载' : '下载并手动安装';
   $('#upbar-go').onclick = () => {
-    if (pc) {
-      // EXE 壳：自己下载 + 校验 + 静默安装 + 重启，装完即是最新版
-      window.open('xzl-update://install?url=' + encodeURIComponent(rel.url), '_blank');
+    if (canAutoUpdate) {
+      window.open('xzl-update://install?url=' + encodeURIComponent(absUrl), '_blank');
     } else {
-      window.open(rel.url, '_blank');      // 手机端等仍交给系统浏览器下载
+      window.open(absUrl, '_blank');       // 老壳/手机：交给系统浏览器下载，装一次后即可自动更新
     }
   };
   $('#upbar-later').onclick = () => {
