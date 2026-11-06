@@ -83,7 +83,7 @@ function signToken(account, role) {
 }
 /* 固件下载链接签名：让「知道 id」不再等于「能拿到文件」。
  * 设备 OTA 无法携带登录令牌，所以用带过期时间的签名链接代替匿名开放。 */
-const FW_URL_SECRET = process.env.FW_URL_SECRET || process.env.SESSION_SECRET || '';
+const FW_URL_SECRET = process.env.FW_URL_SECRET || SESSION_SECRET;   // 复用已加载的会话密钥（它有落盘持久化保障）
 function fwUrlSig(id, exp) {
   if (!FW_URL_SECRET) return '';
   return crypto.createHmac('sha256', FW_URL_SECRET).update(id + '|' + exp).digest('hex').slice(0, 32);
