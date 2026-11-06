@@ -329,7 +329,7 @@ body.is-mobile .navbtn[data-view="debug"] { display: none !important; }
   <button class="later" id="upbar-later">稍后</button>
 </div>
 <header>
-  <h1>ZILO 管理后台<span class="ver" id="app-ver">v1.1.0</span></h1>
+  <h1>ZILO 管理后台<span class="ver" id="app-ver">v1.1.1</span></h1>
   <nav class="topnav" id="topnav">
     <div class="navbtn on" data-view="devices">全部设备</div>
     <div class="navbtn" data-view="insights">用户数据库</div>
@@ -3199,6 +3199,41 @@ async function checkUpdate() {
 applyPlatformUI();   // 页面一加载就按平台收按钮，不等登录完成
 window.addEventListener('load', applyPlatformUI);
 
+/* 云端没有持久盘：未配置 GIT_DATA_REPO 时，平台重启/重建容器会把 data/ 清空。
+   这里必须显式警告——否则用户会看到「保存成功，过一会又变回去」，还以为是功能 BUG。 */
+function warnIfNoPersistence(h) {
+  const p = h && h.persist;
+  if (!p) return;
+  const bk = p.backup || {};
+  // 1) 备份令牌失效/恢复失败：数据可能已经丢过一次，必须最高优先级提示
+  if (p.gitBackup && bk.restoreFailed) {
+    showPersistAlert('⚠️ 数据备份恢复失败：服务器从备份仓库读取数据时出错（GitHub 令牌可能已过期或被截断）。' +
+      '本次启动用的是空数据，请重新生成令牌并更新 GIT_DATA_REPO 后重启。', '#fdecea', '#f3b4b0', '#8a1c14');
+    return;
+  }
+  // 2) 完全没配置持久化：本地文件在容器重建时会清空
+  if (p.gitBackup) return;
+  const host = location.hostname;
+  const local = host === 'localhost' || host === '127.0.0.1' || /^192\.168\./.test(host);
+  if (local) return;
+  showPersistAlert('当前云端未开启数据持久化：新增账号、修改或删除设备在服务器重启后会丢失。' +
+    '请在部署平台把私有数据仓库地址配置到环境变量 GIT_DATA_REPO 后重启一次。', '#fff4e5', '#f0c48a', '#8a4b00');
+}
+
+/* 顶部常驻提示条（同一次会话只提示一次，可手动关闭） */
+function showPersistAlert(msg, bg, border, fg) {
+  if (sessionStorage.getItem('xz_persist_warned') === '1') return;
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:sticky;top:0;z-index:99;background:' + bg + ';border-bottom:1px solid ' + border +
+    ';color:' + fg + ';font-size:13px;line-height:1.6;padding:8px 14px;display:flex;gap:10px;align-items:flex-start';
+  bar.innerHTML = '<span style="flex:1">' + msg + '</span>' +
+    '<button style="background:none;border:1px solid ' + border + ';color:' + fg +
+    ';border-radius:6px;padding:2px 10px;cursor:pointer">知道了</button>';
+  document.body.insertBefore(bar, document.body.firstChild);
+  const c = bar.querySelector('button');
+  if (c) c.onclick = () => { bar.remove(); sessionStorage.setItem('xz_persist_warned', '1'); };
+}
+
 async function boot() {
   // 免登录校验：本地有令牌且服务端有效 → 直接进入
   const token = localStorage.getItem('xz_token') || '';
@@ -3225,6 +3260,7 @@ async function boot() {
     // 版本号以服务端为准：一处改版，页面自动跟上
     const verEl = $('#app-ver');
     if (verEl && h.version) verEl.textContent = 'v' + h.version;
+    warnIfNoPersistence(h);
   }
   else setPill('srv', false);
   connectWS();

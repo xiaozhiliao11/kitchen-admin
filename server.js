@@ -187,7 +187,7 @@ function loginFail(account) {
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 // 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.1.1';
 
 // 上行数据签名密钥：与固件 dev_secret 同值。未设置时进入兼容模式（只记录不拦截），
 // 设置 DEV_SECRET_STRICT=1 后才强制丢弃未签名/签名错误的上报。
@@ -1498,8 +1498,38 @@ app.post('/api/devices/:id/ai', deviceParam, async (req, res) => {
 });
 
 // 服务健康
+/* 读日志最后一行，供健康检查暴露「备份到底有没有推成功」 */
+function readTailLine(file) {
+  try {
+    const txt = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
+    return txt.length ? txt[txt.length - 1].slice(0, 160) : '';
+  } catch { return ''; }
+}
+
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: APP_VERSION, mqtt: mqttClient && mqttClient.connected, devices: Object.keys(store.getDevices()).length });
+  // persist 用于判定「数据到底存不存得住」：云平台容器无持久盘时，重启即丢，
+  // 前端据此显示告警，而不是让用户以为保存成功、过一会又变回去。
+  let writable = true;
+  try { fs.accessSync(config.dataDir, fs.constants.W_OK); } catch { writable = false; }
+  res.json({
+    ok: true,
+    version: APP_VERSION,
+    mqtt: mqttClient && mqttClient.connected,
+    devices: Object.keys(store.getDevices()).length,
+    persist: {
+      gitBackup: !!process.env.GIT_DATA_REPO,
+      writable,
+      dataDir: config.dataDir,
+      users: Object.keys(store.getUsers ? store.getUsers() : {}).length,
+      // 备份是否真的在工作：有工作树、没恢复失败标记、最近一次推送是否成功
+      backup: {
+        workTree: fs.existsSync(path.join(config.dataDir, '.git')),
+        restoreFailed: fs.existsSync(path.join(config.dataDir, '.restore_failed')),
+        lastLog: readTailLine(path.join(__dirname, 'logs', 'backup.log'))
+      }
+    },
+    uptimeSec: Math.round(process.uptime())
+  });
 });
 
 /* 安装包下载：必须由后台自己给，不能经过图片 CDN ——

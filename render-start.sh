@@ -4,7 +4,7 @@
 # 环境变量:
 #   GIT_DATA_REPO            数据备份仓库地址（可含 token）
 #   GIT_DATA_BRANCH          分支（默认 main）
-#   BACKUP_INTERVAL_SEC      备份间隔秒数（默认 300）
+#   BACKUP_INTERVAL_SEC      备份间隔秒数（默认 60，数据量小，缩短窗口减少丢失）
 #   SIM=1                    启动模拟器做演示（默认不启动，避免伪造设备在线）
 #   NO_SIM=1                 兼容旧变量：设为 1 时也不启动模拟器
 cd "$(dirname "$0")"
@@ -28,10 +28,22 @@ if [ -n "$GIT_DATA_REPO" ]; then
         && git add -f -A . && git commit -qm "init data" && git branch -M "$BRANCH" && git remote add origin "$GIT_DATA_REPO") \
         && echo "[data] 本地数据已初始化并关联备份仓库" || echo "[data] ⚠️ 初始化失败"
     else
-      rm -rf data && git clone -q -b "$BRANCH" "$GIT_DATA_REPO" data 2>/dev/null \
-        && echo "[data] 已从备份仓库恢复" \
-        || { mkdir -p data && (cd data && git init -q && git config user.name "kitchen-admin" && git config user.email "kitchen-admin@render" \
-             && git branch -M "$BRANCH" && git remote add origin "$GIT_DATA_REPO"); echo "[data] 备份仓库为空，已新建"; }
+      rm -rf data
+      if git clone -q -b "$BRANCH" "$GIT_DATA_REPO" data 2>>logs/restore.log; then
+        echo "[data] 已从备份仓库恢复"
+      elif [ -n "$(git ls-remote "$GIT_DATA_REPO" 2>/dev/null | head -1)" ]; then
+        # 远端有数据却克隆失败：令牌失效/被截断/权限不足。
+        # 绝不能在这里静默新建空工作树——那会让「已保存的数据」看起来凭空消失。
+        mkdir -p data
+        date '+%F %T' > data/.restore_failed
+        echo "[data] ❌ 备份仓库有数据但恢复失败（令牌或权限问题），本次以空库启动；详见 logs/restore.log"
+      else
+        # 远端确实为空/不存在：首次初始化一个空工作树
+        mkdir -p data && (cd data && git init -q && git config user.name "kitchen-admin" \
+          && git config user.email "kitchen-admin@render" && git branch -M "$BRANCH" \
+          && git remote add origin "$GIT_DATA_REPO")
+        echo "[data] 备份仓库为空，已新建"
+      fi
     fi
   else
     (cd data && git config user.name "kitchen-admin" && git config user.email "kitchen-admin@render" \
@@ -41,7 +53,7 @@ if [ -n "$GIT_DATA_REPO" ]; then
   # 后台备份循环
   (
     while true; do
-      sleep "${BACKUP_INTERVAL_SEC:-300}"
+      sleep "${BACKUP_INTERVAL_SEC:-60}"
       # 每轮先确保提交身份（克隆/新建/拉取各路径都覆盖），仅当有数据变化时才提交推送
       if (cd data && git config user.name "kitchen-admin" && git config user.email "kitchen-admin@render" \
           && git add -f -A . && ! git diff --cached --quiet) 2>>logs/backup.log; then
@@ -50,7 +62,7 @@ if [ -n "$GIT_DATA_REPO" ]; then
       fi
     done
   ) &
-  echo "[backup] 后台备份已启动，每 ${BACKUP_INTERVAL_SEC:-300}s"
+  echo "[backup] 后台备份已启动，每 ${BACKUP_INTERVAL_SEC:-60}s"
 fi
 
 # 模拟器（默认不启动：模拟器会伪造 A001~A003 心跳，让后台把「假在线」当真，
