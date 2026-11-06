@@ -7,3 +7,6 @@ data/.gitkeep
 
 # 固件库：bin 随仓库分发，索引由启动自愈重建
 firmware-store/meta.json
+
+# 构建产物不入库（仓库体积上限 488MB）
+firmware/ci-out/
