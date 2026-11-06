@@ -5,7 +5,8 @@
 #   GIT_DATA_REPO            数据备份仓库地址（可含 token）
 #   GIT_DATA_BRANCH          分支（默认 main）
 #   BACKUP_INTERVAL_SEC      备份间隔秒数（默认 300）
-#   NO_SIM=1                 设为 1 时不启动模拟器（接真机时）
+#   SIM=1                    启动模拟器做演示（默认不启动，避免伪造设备在线）
+#   NO_SIM=1                 兼容旧变量：设为 1 时也不启动模拟器
 cd "$(dirname "$0")"
 mkdir -p data logs
 
@@ -52,10 +53,13 @@ if [ -n "$GIT_DATA_REPO" ]; then
   echo "[backup] 后台备份已启动，每 ${BACKUP_INTERVAL_SEC:-300}s"
 fi
 
-# 模拟器（默认启动；接真机时设 NO_SIM=1）
-if [ "${NO_SIM:-0}" != "1" ]; then
+# 模拟器（默认不启动：模拟器会伪造 A001~A003 心跳，让后台把「假在线」当真，
+# 设备状态与真实完全脱钩。需要演示时显式设 SIM=1）
+if [ "${SIM:-0}" = "1" ] && [ "${NO_SIM:-0}" != "1" ]; then
   node simulate/simulate.js --interval 30 >> logs/simulate.log 2>&1 &
-  echo "[sim] 模拟器已启动"
+  echo "[sim] 模拟器已启动（SIM=1）"
+else
+  echo "[sim] 模拟器未启动（真实设备模式）"
 fi
 
 # 前台运行后端（Render 需要主进程常驻监听 PORT）
