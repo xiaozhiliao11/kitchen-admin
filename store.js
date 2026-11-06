@@ -12,6 +12,7 @@ const { dataDir, firmwareDir } = require('./config');
 const DEV_FILE = () => path.join(dataDir, 'devices.json');
 const EV_FILE = () => path.join(dataDir, 'events.json');
 const SET_FILE = () => path.join(dataDir, 'settings.json');
+const USER_FILE = () => path.join(dataDir, 'users.json');
 const FW_DIR = () => firmwareDir;
 const FW_META_FILE = () => path.join(firmwareDir, 'meta.json');
 
@@ -162,6 +163,43 @@ function saveSettings(obj) {
   save(SET_FILE(), obj);
 }
 
+/* ---------------- 用户账号（多账号登录体系） ---------------- */
+/* users.json : { "<account>": { account, name, role, status, salt, hash, createdAt, lastLoginAt } }
+ * role: 'admin' 管理员 | 'member' 子账号
+ * status: 'active' 正常 | 'paused' 已暂停（登录被拒，会话即失效）
+ * 密码只存 scrypt 盐+哈希，永不存明文。 */
+let userCache = null;
+
+function getUsers() {
+  if (!userCache) userCache = load(USER_FILE(), {});
+  return userCache;
+}
+
+function getUser(account) {
+  return getUsers()[account] || null;
+}
+
+function upsertUser(rec) {
+  const m = getUsers();
+  m[rec.account] = Object.assign({}, m[rec.account] || {}, rec);
+  save(USER_FILE(), m);
+  return m[rec.account];
+}
+
+function removeUser(account) {
+  const m = getUsers();
+  delete m[account];
+  save(USER_FILE(), m);
+}
+
+/** 列出用户（不含密码哈希） */
+function listUsers() {
+  return Object.values(getUsers()).map((u) => ({
+    account: u.account, name: u.name || '', role: u.role, status: u.status || 'active',
+    createdAt: u.createdAt || 0, lastLoginAt: u.lastLoginAt || 0
+  }));
+}
+
 module.exports = {
   getDevices,
   saveDevices,
@@ -175,5 +213,10 @@ module.exports = {
   getFirmwares,
   saveFirmwares,
   getFirmware,
-  removeFirmware
+  removeFirmware,
+  getUsers,
+  getUser,
+  upsertUser,
+  removeUser,
+  listUsers
 };

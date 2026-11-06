@@ -202,6 +202,25 @@
   .devop:hover{border-color:var(--blue);color:var(--blue)}
   .devop:disabled{opacity:.5}
   @media (max-width:760px){.sensor-grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}.sensor-cell{padding:8px 10px}.sensor-cell .s-val{font-size:13px}.devop{min-height:42px}}
+  /* 账号登录 / 账号管理 */
+  .hdr-user{display:none;align-items:center;gap:6px;margin-left:10px}
+  .btn-sm{padding:5px 10px;font-size:12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);cursor:pointer;min-height:30px}
+  .btn-sm:hover{border-color:var(--blue);color:var(--blue)}
+  .btn-sm.danger:hover{border-color:var(--red);color:var(--red)}
+  .login-card{background:#fff;border-radius:14px;padding:30px 28px;max-width:360px;width:90%;box-sizing:border-box;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+  .login-card .lr{margin-bottom:12px}
+  .login-card .lr label{display:block;font-size:13px;color:var(--sub);margin-bottom:5px}
+  .login-card .lr input{width:100%;box-sizing:border-box;padding:10px 12px;font-size:16px;border:1px solid #ccd3e0;border-radius:8px}
+  .u-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line)}
+  .u-row:last-child{border-bottom:none}
+  .u-tag{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--gray-l);color:var(--sub)}
+  .u-tag.admin{background:var(--blue-l);color:var(--blue);font-weight:600}
+  .u-tag.paused{background:#fdeaea;color:var(--red)}
+  .u-ops{margin-left:auto;display:flex;gap:6px}
+  .u-new{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:end}
+  .u-new .lr{flex:1;min-width:130px}
+  .u-new .lr label{display:block;font-size:12px;color:var(--sub);margin-bottom:4px}
+  .u-new .lr input{width:100%;box-sizing:border-box;padding:8px 10px;font-size:14px;border:1px solid #ccd3e0;border-radius:8px}
 </style>
 </head>
 <body>
@@ -218,6 +237,7 @@
     <span class="pill" id="mqt"><span class="dot" id="mqt-dot"></span>MQTT</span>
     <span class="pill" id="wss"><span class="dot" id="wss-dot"></span>实时通道</span>
   </div>
+  <div class="hdr-user" id="hdr-user"></div>
 </header>
 
 <div class="wrap"><main id="main"><div class="empty">正在加载…</div></main></div>
@@ -263,12 +283,12 @@ async function api(path, opt) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 12000); // 12 秒超时：避免网络半断时界面长时间无响应
   const headers = { 'Content-Type': 'application/json' };
-  const tok = localStorage.getItem('xz_admin_token') || '';
+  const tok = localStorage.getItem('xz_token') || '';
   if (tok) headers['X-Admin-Token'] = tok;
   try {
     const r = await fetch(path, Object.assign({ headers, signal: ctrl.signal }, opt));
     clearTimeout(t);
-    if (r.status === 401) { localStorage.removeItem('xz_admin_token'); showAuthGate(); throw new Error('未授权：请输入管理口令'); }
+    if (r.status === 401) { localStorage.removeItem('xz_token'); showLoginPage('登录已失效，请重新登录'); throw new Error('未登录或登录已失效'); }
     return r.json();
   } catch (e) {
     clearTimeout(t);
@@ -284,6 +304,7 @@ function setView(v) {
   else if (v === 'flash') renderFlashPage();
   else if (v === 'ai') renderAIPage();
   else if (v === 'debug') renderDebugPage();
+  else if (v === 'users') renderUsersPage();
   else if (v === 'detail') {
     renderMain();
     // 详情页属于「全部设备」的功能延伸：保持顶部「全部设备」高亮
@@ -299,6 +320,7 @@ document.addEventListener('click', (e) => {
 /* ================= 全部设备主页 ================= */
 let lastDevicesKey = ''; // 首页防重绘：列表内容无变化时跳过 innerHTML 重建
 async function loadDevices() {
+  if (!me) return;   // 未登录不请求（登录页显示中）
   try {
     const data = await api('/api/devices');
     devices = data.devices || [];
@@ -1674,7 +1696,7 @@ function loadDevicesDebounced() {
 }
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(proto + '//' + location.host + '/ws');
+  ws = new WebSocket(proto + '//' + location.host + '/ws?token=' + encodeURIComponent(localStorage.getItem('xz_token') || ''));
   ws.onopen = () => setPill('wss', true);
   ws.onclose = () => { setPill('wss', false); setTimeout(connectWS, 3000); };
   ws.onmessage = (ev) => {
@@ -1754,53 +1776,192 @@ function refreshDiag() {
 function refreshEvents() { const tb = $('#tab-body'); if (tb && curTab() === 'events') tb.innerHTML = tabBody('events'); }
 function curTab() { const t = document.querySelector('.tab.on'); return t ? t.dataset.tab : null; }
 
-/* ================= 启动 ================= */
-/* 管理口令门：服务端配置 ADMIN_TOKEN 后，先验证口令再加载数据 */
-function showAuthGate() {
-  if (document.getElementById('auth-gate')) return;
-  const gate = document.createElement('div');
-  gate.id = 'auth-gate';
-  gate.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,25,40,.92);display:flex;align-items:center;justify-content:center;';
-  gate.innerHTML = '<div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:340px;width:90%;box-sizing:border-box;text-align:center">' +
-    '<h3 style="margin:0 0 6px">小知了厨房卫士后台</h3>' +
-    '<p class="muted" style="margin:0 0 14px">已开启管理口令保护，请输入口令后使用。</p>' +
-    '<input id="auth-token" type="password" placeholder="管理口令" style="width:100%;box-sizing:border-box;padding:10px 12px;font-size:16px;border:1px solid #ccd;border-radius:8px">' +
-    '<button id="auth-ok" class="primary" style="width:100%;margin-top:12px">进入后台</button>' +
-    '<div id="auth-err" class="muted" style="margin-top:10px;color:#c33"></div></div>';
-  document.body.appendChild(gate);
-  const input = document.getElementById('auth-token');
-  const doVerify = async () => {
-    const token = input.value.trim();
-    if (!token) { document.getElementById('auth-err').textContent = '请输入口令'; return; }
-    document.getElementById('auth-err').textContent = '验证中…';
+/* ================= 账号登录 / 启动 ================= */
+let me = null;   // 当前登录用户 { account, role, name }
+
+function showLoginPage(msg) {
+  if (document.getElementById('login-page')) return;
+  const page = document.createElement('div');
+  page.id = 'login-page';
+  page.style.cssText = 'position:fixed;inset:0;z-index:9999;background:linear-gradient(160deg,#0f1930,#1f3050);display:flex;align-items:center;justify-content:center;';
+  page.innerHTML = '<div class="login-card">' +
+    '<h2 style="margin:0 0 4px;font-size:20px">小知了厨房卫士后台</h2>' +
+    '<p class="muted" style="margin:0 0 18px;font-size:13px">请使用管理员或团队账号登录</p>' +
+    '<div class="lr"><label>账号</label><input id="login-acc" type="text" autocomplete="username" placeholder="管理员账号或子账号" value="' + esc(localStorage.getItem('xz_last_acc') || '') + '"></div>' +
+    '<div class="lr"><label>密码</label><input id="login-pwd" type="password" autocomplete="current-password" placeholder="密码"></div>' +
+    '<button id="login-btn" class="primary" style="width:100%;margin-top:8px;min-height:42px">登录</button>' +
+    '<div id="login-msg" style="margin-top:10px;font-size:13px;color:#c33;min-height:18px">' + esc(msg || '') + '</div>' +
+    '<p class="muted" style="font-size:12px;margin:12px 0 0">登录后 7 天内自动保持登录状态，无需重复输入</p>' +
+    '</div>';
+  document.body.appendChild(page);
+  const acc = document.getElementById('login-acc'), pwd = document.getElementById('login-pwd');
+  const doLogin = async () => {
+    const account = acc.value.trim(), password = pwd.value;
+    const msgEl = document.getElementById('login-msg');
+    if (!account || !password) { msgEl.textContent = '请输入账号和密码'; return; }
+    msgEl.textContent = '登录中…';
     try {
-      const r = await fetch('/api/auth/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+      const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account, password }) });
       const j = await r.json();
-      if (r.ok && j.ok) { localStorage.setItem('xz_admin_token', token); location.reload(); }
-      else document.getElementById('auth-err').textContent = (j && j.error) || '口令错误';
-    } catch (e) { document.getElementById('auth-err').textContent = '验证失败：请检查网络'; }
+      if (r.ok && j.ok) {
+        localStorage.setItem('xz_token', j.token);
+        localStorage.setItem('xz_last_acc', account);
+        location.reload();
+      } else {
+        msgEl.textContent = (j && j.error) || '登录失败';
+      }
+    } catch (e) { msgEl.textContent = '网络错误，请重试'; }
   };
-  document.getElementById('auth-ok').onclick = doVerify;
-  input.onkeydown = (e) => { if (e.key === 'Enter') doVerify(); };
-  input.focus();
+  document.getElementById('login-btn').onclick = doLogin;
+  acc.onkeydown = (e) => { if (e.key === 'Enter') pwd.focus(); };
+  pwd.onkeydown = (e) => { if (e.key === 'Enter') doLogin(); };
+  (acc.value ? pwd : acc).focus();
+}
+
+/* 顶栏账号区：当前账号 + 账号管理（仅管理员）+ 改密码 + 退出 */
+function renderUserBadge() {
+  const el = document.getElementById('hdr-user');
+  if (!el || !me) return;
+  el.style.display = 'flex';
+  el.innerHTML = '<span class="muted" style="font-size:12px">' + esc(me.name || me.account) + (me.role === 'admin' ? '（管理员）' : '') + '</span>' +
+    (me.role === 'admin' ? '<button class="btn-sm" id="btn-users">账号管理</button>' : '') +
+    '<button class="btn-sm" id="btn-pwd">修改密码</button>' +
+    '<button class="btn-sm danger" id="btn-logout">退出</button>';
+  const ub = document.getElementById('btn-users');
+  if (ub) ub.onclick = () => setView('users');
+  document.getElementById('btn-pwd').onclick = () => changePwdModal(me.account, true);
+  document.getElementById('btn-logout').onclick = () => {
+    localStorage.removeItem('xz_token');
+    fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Admin-Token': localStorage.getItem('xz_token') || '' } }).catch(() => {});
+    location.reload();
+  };
+}
+
+/* 改密码弹窗：isSelf=true 需原密码；管理员改他人密码则不需要 */
+let pwdCb = null;
+function changePwdModal(account, isSelf) {
+  if (document.getElementById('pwd-modal')) return;
+  const modal = document.createElement('div');
+  modal.id = 'pwd-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(20,25,40,.55);display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML = '<div class="login-card" style="max-width:340px">' +
+    '<h3 style="margin:0 0 4px">修改密码</h3>' +
+    '<p class="muted" style="margin:0 0 14px;font-size:13px">' + (isSelf ? '当前账号：' + esc(account) : '为账号 <b>' + esc(account) + '</b> 设置新密码') + '</p>' +
+    (isSelf ? '<div class="lr"><label>原密码</label><input id="pwd-old" type="password" placeholder="原密码"></div>' : '') +
+    '<div class="lr"><label>新密码</label><input id="pwd-new" type="password" placeholder="6~64 位"></div>' +
+    '<div id="pwd-msg" style="margin-top:8px;font-size:13px;color:#c33;min-height:18px"></div>' +
+    '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn-sm" id="pwd-cancel" style="flex:1;min-height:38px">取消</button><button class="primary" id="pwd-ok" style="flex:1;min-height:38px">确定</button></div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  const close = () => { const m = document.getElementById('pwd-modal'); if (m) m.remove(); };
+  document.getElementById('pwd-cancel').onclick = close;
+  document.getElementById('pwd-ok').onclick = async () => {
+    const newPwd = document.getElementById('pwd-new').value;
+    const msgEl = document.getElementById('pwd-msg');
+    if (newPwd.length < 6 || newPwd.length > 64) { msgEl.textContent = '新密码需 6~64 位'; return; }
+    msgEl.textContent = '提交中…';
+    try {
+      let r;
+      if (isSelf) {
+        const oldPwd = document.getElementById('pwd-old').value;
+        r = await api('/api/auth/password', { method: 'POST', body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd }) });
+        if (r && r.error) { msgEl.textContent = r.error; return; }
+        close();
+        alert('密码已修改，请重新登录');
+        localStorage.removeItem('xz_token');
+        location.reload();
+        return;
+      }
+      r = await api('/api/users/' + encodeURIComponent(account), { method: 'PATCH', body: JSON.stringify({ password: newPwd }) });
+      if (r && r.error) { msgEl.textContent = r.error; return; }
+      close();
+      if (pwdCb) { pwdCb(); pwdCb = null; }
+    } catch (e) { msgEl.textContent = e.message; }
+  };
+  document.getElementById('pwd-new').focus();
+}
+
+/* 账号管理页（仅管理员） */
+function renderUsersPage() {
+  const main = $('#main');
+  main.innerHTML = '<div class="card"><h2 style="margin:0 0 4px;font-size:17px">账号管理</h2>' +
+    '<p class="muted" style="margin:0 0 6px;font-size:13px">创建团队子账号、暂停/恢复、删除、设置密码。子账号可登录并自行修改密码。</p>' +
+    '<div id="users-body"><div class="empty">加载中…</div></div>' +
+    '<div class="u-new">' +
+    '<div class="lr"><label>账号</label><input id="nu-acc" type="text" placeholder="3~32 位字母数字"></div>' +
+    '<div class="lr"><label>姓名</label><input id="nu-name" type="text" placeholder="选填"></div>' +
+    '<div class="lr"><label>密码</label><input id="nu-pwd" type="password" placeholder="6~64 位"></div>' +
+    '<button class="primary" id="nu-add" style="min-height:38px">新建子账号</button>' +
+    '</div></div>';
+  document.getElementById('nu-add').onclick = async () => {
+    const account = document.getElementById('nu-acc').value.trim();
+    const name = document.getElementById('nu-name').value.trim();
+    const password = document.getElementById('nu-pwd').value;
+    if (!account || !password) { alert('请填写账号和密码'); return; }
+    const r = await api('/api/users', { method: 'POST', body: JSON.stringify({ account, name, password }) }).catch((e) => ({ error: e.message }));
+    if (r && r.error) { alert(r.error); return; }
+    document.getElementById('nu-acc').value = '';
+    document.getElementById('nu-name').value = '';
+    document.getElementById('nu-pwd').value = '';
+    loadUsers();
+  };
+  loadUsers();
+}
+
+async function loadUsers() {
+  const body = $('#users-body');
+  if (!body) return;
+  try {
+    const r = await api('/api/users');
+    const users = (r && r.users) || [];
+    body.innerHTML = users.map((u) => {
+      const isRoot = u.account === '17067459876';
+      const isMe = me && me.account === u.account;
+      const roleTag = u.role === 'admin' ? '<span class="u-tag admin">管理员</span>' : '<span class="u-tag">子账号</span>';
+      const stTag = (u.status === 'paused') ? '<span class="u-tag paused">已暂停</span>' : '<span class="u-tag">正常</span>';
+      const last = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('zh-CN', { hour12: false }) : '从未登录';
+      return '<div class="u-row">' +
+        '<div><b>' + esc(u.account) + '</b> ' + (u.name ? '<span class="muted">' + esc(u.name) + '</span>' : '') + '</div>' +
+        roleTag + stTag +
+        '<span class="muted" style="font-size:12px">最后登录：' + esc(last) + '</span>' +
+        '<div class="u-ops">' +
+        '<button class="btn-sm" data-act="pwd" data-acc="' + esc(u.account) + '">设密码</button>' +
+        (isRoot || isMe ? '' : '<button class="btn-sm" data-act="' + (u.status === 'paused' ? 'resume' : 'pause') + '" data-acc="' + esc(u.account) + '">' + (u.status === 'paused' ? '恢复' : '暂停') + '</button>') +
+        (isRoot || isMe ? '' : '<button class="btn-sm danger" data-act="del" data-acc="' + esc(u.account) + '">删除</button>') +
+        '</div></div>';
+    }).join('') || '<div class="empty">暂无账号</div>';
+    body.querySelectorAll('[data-act]').forEach((btn) => {
+      btn.onclick = async () => {
+        const acc = btn.dataset.acc, act = btn.dataset.act;
+        if (act === 'pwd') { changePwdModal(acc, false); pwdCb = loadUsers; return; }
+        if (act === 'del') { if (!confirm('确定删除账号 ' + acc + '？')) return; }
+        if (act === 'pause' || act === 'resume') {
+          const r = await api('/api/users/' + encodeURIComponent(acc), { method: 'PATCH', body: JSON.stringify({ status: act === 'pause' ? 'paused' : 'active' }) }).catch((e) => ({ error: e.message }));
+          if (r && r.error) { alert(r.error); return; }
+          loadUsers(); return;
+        }
+        if (act === 'del') {
+          const r = await api('/api/users/' + encodeURIComponent(acc), { method: 'DELETE' }).catch((e) => ({ error: e.message }));
+          if (r && r.error) { alert(r.error); return; }
+          loadUsers();
+        }
+      };
+    });
+  } catch (e) {
+    body.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
 }
 
 async function boot() {
-  // 管理口令门：服务端启用后，未验证前不加载数据
+  // 免登录校验：本地有令牌且服务端有效 → 直接进入
+  const token = localStorage.getItem('xz_token') || '';
+  if (!token) { showLoginPage(); return; }
   try {
-    const st = await api('/api/auth/status');
-    if (st && st.enabled) {
-      const tok = localStorage.getItem('xz_admin_token') || '';
-      let ok = false;
-      if (tok) {
-        try {
-          const v = await fetch('/api/auth/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) });
-          ok = v.ok;
-        } catch (e) { ok = false; }
-      }
-      if (!ok) { localStorage.removeItem('xz_admin_token'); showAuthGate(); return; }
-    }
+    const r = await fetch('/api/auth/me', { headers: { 'X-Admin-Token': token } });
+    if (r.status === 401) { localStorage.removeItem('xz_token'); showLoginPage('登录已失效，请重新登录'); return; }
+    me = await r.json();
   } catch (e) { /* 服务不可达：继续加载，顶部状态会显示服务离线 */ }
+  renderUserBadge();
   // 并行发起：健康检查 / 设备列表 / 固件库 / 事件预热，互不阻塞，首屏更快
   const [h] = await Promise.all([
     api('/api/health').catch(() => null),

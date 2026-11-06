@@ -30,37 +30,169 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/vendor/esptool-js', express.static(path.join(__dirname, 'node_modules', 'esptool-js')));
 app.use('/firmware-store', express.static(config.firmwareDir));
 
-/* ---------------- 管理口令（可选）：ADMIN_TOKEN 非空时启用，所有 /api 需带 X-Admin-Token ---------------- */
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
-// 以下接口豁免（设备/健康/口令验证/OTA 固件下载——固件 HTTP 下载不带令牌）
-const AUTH_EXEMPT = new Set([
-  '/api/health',
-  '/api/auth/status',
-  '/api/auth/verify'
-]);
+/* ---------------- 账号登录体系（管理员 + 团队子账号） ---------------- */
+// 会话签名密钥：优先环境变量；否则首启生成随机密钥并落盘（data/session-secret），
+// 保证重启不掉登录、且不依赖写死的默认值（默认值公开可伪造令牌）
+function loadSessionSecret() {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  if (process.env.ADMIN_TOKEN) return process.env.ADMIN_TOKEN;
+  const f = path.join(config.dataDir, 'session-secret');
+  try {
+    const s = fs.readFileSync(f, 'utf8').trim();
+    if (s.length >= 32) return s;
+  } catch {}
+  const s = crypto.randomBytes(24).toString('hex');
+  try {
+    fs.mkdirSync(config.dataDir, { recursive: true });
+    fs.writeFileSync(f, s);
+  } catch (e) { console.error('[认证] 会话密钥落盘失败：' + e.message); }
+  return s;
+}
+const SESSION_SECRET = loadSessionSecret();
+const TOKEN_TTL_MS = 7 * 24 * 3600 * 1000;          // 登录状态保持 7 天（免重复登录）
+const ACCOUNT_RE = /^[A-Za-z0-9_-]{3,32}$/;
+const PWD_MIN = 6, PWD_MAX = 64;
+const ROOT_ADMIN = '17067459876';
+
+function hashPassword(pw) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(pw, salt, 32).toString('hex');
+  return { salt, hash };
+}
+function verifyPassword(pw, salt, hash) {
+  try {
+    const h = crypto.scryptSync(pw, salt, 32);
+    const expect = Buffer.from(hash, 'hex');
+    return h.length === expect.length && crypto.timingSafeEqual(h, expect);
+  } catch { return false; }
+}
+function signToken(account, role) {
+  const exp = Date.now() + TOKEN_TTL_MS;
+  const payload = Buffer.from(JSON.stringify({ a: account, r: role, e: exp })).toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  return payload + '.' + sig;
+}
+function verifyToken(token) {
+  try {
+    const [p, s] = String(token || '').split('.');
+    if (!p || !s) return null;
+    const sig = crypto.createHmac('sha256', SESSION_SECRET).update(p).digest('base64url');
+    if (sig.length !== s.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(s))) return null;
+    const j = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
+    if (!j || !j.a || (j.e || 0) < Date.now()) return null;
+    const u = store.getUser(j.a);
+    if (!u || (u.status || 'active') === 'paused') return null;   // 暂停/删除后会话立即失效
+    return { account: u.account, role: u.role, name: u.name || '' };
+  } catch { return null; }
+}
+// 登录失败限速（内存）：同账号连续 5 次失败锁 60 秒
+const loginFails = new Map();
+function loginLocked(account) { const f = loginFails.get(account); return !!(f && f.until > Date.now()); }
+function loginFail(account) {
+  const f = loginFails.get(account) || { count: 0, until: 0 };
+  f.count += 1;
+  if (f.count >= 5) { f.until = Date.now() + 60000; f.count = 0; }
+  loginFails.set(account, f);
+}
+// 首次部署开箱即用：无任何用户时创建管理员账号
+(function initAdmin() {
+  if (Object.keys(store.getUsers()).length > 0) return;
+  const { salt, hash } = hashPassword('123456');
+  store.upsertUser({ account: ROOT_ADMIN, name: '管理员', role: 'admin', status: 'active', salt, hash, createdAt: Date.now(), lastLoginAt: 0 });
+  console.log('[认证] 已初始化管理员账号 ' + ROOT_ADMIN);
+})();
+
+// 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
+// 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
+const AUTH_EXEMPT = new Set(['/api/health', '/api/auth/login']);
 app.use('/api', (req, res, next) => {
-  if (!ADMIN_TOKEN) return next();                                  // 未配置=兼容放行
-  const p = req.path;
+  const p = (req.originalUrl || req.url || '').split('?')[0];
   if (AUTH_EXEMPT.has(p)) return next();
-  if (/^\/firmwares\/[^/]+\/download$/.test(p)) return next();      // OTA 下载豁免
-  const t = req.get('X-Admin-Token') || '';
-  if (t.length !== ADMIN_TOKEN.length || !crypto.timingSafeEqual(Buffer.from(t), Buffer.from(ADMIN_TOKEN))) {
-    return res.status(401).json({ error: '未授权：缺少或错误的管理口令（X-Admin-Token）' });
-  }
+  if (/^\/api\/firmwares\/[^/]+\/download$/.test(p)) return next();
+  const u = verifyToken(req.get('X-Admin-Token') || req.query.token || '');
+  if (!u) return res.status(401).json({ error: '未登录或登录已失效，请重新登录' });
+  req.user = u;
   next();
 });
-app.get('/api/auth/status', (req, res) => res.json({ enabled: !!ADMIN_TOKEN }));
-app.post('/api/auth/verify', (req, res) => {
-  const t = (req.body && req.body.token) || '';
-  if (!ADMIN_TOKEN) return res.json({ ok: true, enabled: false });
-  if (t.length !== ADMIN_TOKEN.length || !crypto.timingSafeEqual(Buffer.from(t), Buffer.from(ADMIN_TOKEN))) {
-    return res.status(401).json({ error: '口令错误' });
+
+app.post('/api/auth/login', (req, res) => {
+  const account = String((req.body && req.body.account) || '').trim();
+  const password = String((req.body && req.body.password) || '');
+  if (loginLocked(account)) return res.status(429).json({ error: '失败次数过多，请 1 分钟后再试' });
+  const u = store.getUser(account);
+  if (!u || !verifyPassword(password, u.salt, u.hash)) { loginFail(account); return res.status(401).json({ error: '账号或密码错误' }); }
+  if ((u.status || 'active') === 'paused') return res.status(403).json({ error: '该账号已被暂停，请联系管理员' });
+  store.upsertUser({ account, lastLoginAt: Date.now() });
+  loginFails.delete(account);
+  res.json({ ok: true, token: signToken(account, u.role), account, role: u.role, name: u.name || '', expires: Date.now() + TOKEN_TTL_MS });
+});
+app.get('/api/auth/me', (req, res) => res.json({ ok: true, account: req.user.account, role: req.user.role, name: req.user.name }));
+app.post('/api/auth/logout', (req, res) => res.json({ ok: true }));   // 无状态令牌：前端删本地 token 即可
+// 所有登录用户：自己改密码
+app.post('/api/auth/password', (req, res) => {
+  const oldPwd = String((req.body && req.body.oldPassword) || '');
+  const newPwd = String((req.body && req.body.newPassword) || '');
+  if (newPwd.length < PWD_MIN || newPwd.length > PWD_MAX) return res.status(400).json({ error: '新密码需 6~64 位' });
+  const u = store.getUser(req.user.account);
+  if (!u || !verifyPassword(oldPwd, u.salt, u.hash)) return res.status(401).json({ error: '原密码错误' });
+  const { salt, hash } = hashPassword(newPwd);
+  store.upsertUser({ account: u.account, salt, hash });
+  res.json({ ok: true });
+});
+
+/* ---- 用户管理（仅管理员） ---- */
+function requireAdmin(req, res, next) {
+  if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: '仅管理员可操作' });
+  next();
+}
+app.get('/api/users', requireAdmin, (req, res) => res.json({ users: store.listUsers() }));
+app.post('/api/users', requireAdmin, (req, res) => {
+  const account = String((req.body && req.body.account) || '').trim();
+  const password = String((req.body && req.body.password) || '');
+  const name = String((req.body && req.body.name) || '').trim();
+  if (!ACCOUNT_RE.test(account)) return res.status(400).json({ error: '账号需 3~32 位字母/数字/下划线/中划线' });
+  if (password.length < PWD_MIN || password.length > PWD_MAX) return res.status(400).json({ error: '密码需 6~64 位' });
+  if (store.getUser(account)) return res.status(400).json({ error: '账号已存在：' + account });
+  const { salt, hash } = hashPassword(password);
+  store.upsertUser({ account, name: name || account, role: 'member', status: 'active', salt, hash, createdAt: Date.now(), lastLoginAt: 0 });
+  res.json({ ok: true, account });
+});
+app.patch('/api/users/:account', requireAdmin, (req, res) => {
+  const account = req.params.account;
+  const u = store.getUser(account);
+  if (!u) return res.status(404).json({ error: '账号不存在' });
+  const patch = { account };
+  if (typeof req.body.name === 'string') patch.name = req.body.name.trim();
+  if (typeof req.body.status === 'string' && ['active', 'paused'].indexOf(req.body.status) >= 0) {
+    if (account === ROOT_ADMIN && req.body.status === 'paused') return res.status(400).json({ error: '管理员账号不能被暂停' });
+    patch.status = req.body.status;
   }
-  res.json({ ok: true, enabled: true });
+  if (typeof req.body.password === 'string') {
+    if (req.body.password.length < PWD_MIN || req.body.password.length > PWD_MAX) return res.status(400).json({ error: '密码需 6~64 位' });
+    const { salt, hash } = hashPassword(req.body.password);
+    patch.salt = salt; patch.hash = hash;
+  }
+  store.upsertUser(patch);
+  res.json({ ok: true, user: { account, name: patch.name !== undefined ? patch.name : u.name, role: u.role, status: patch.status || u.status || 'active' } });
+});
+app.delete('/api/users/:account', requireAdmin, (req, res) => {
+  const account = req.params.account;
+  if (!store.getUser(account)) return res.status(404).json({ error: '账号不存在' });
+  if (account === ROOT_ADMIN) return res.status(400).json({ error: '管理员账号不能删除' });
+  if (account === req.user.account) return res.status(400).json({ error: '不能删除自己' });
+  store.removeUser(account);
+  res.json({ ok: true });
 });
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
+// WebSocket 同样鉴权：连接需带 ?token=<会话令牌>，否则立即关闭
+wss.on('connection', (ws, req) => {
+  let u = null;
+  try { u = verifyToken(new URL(req.url, 'http://x').searchParams.get('token') || ''); } catch {}
+  if (!u) { try { ws.close(4001, 'unauthorized'); } catch {} return; }
+  ws.__user = u;
+});
 
 /* ---------------- 全局设置（AI + 工作流） ---------------- */
 const NO_SETTINGS = {};
