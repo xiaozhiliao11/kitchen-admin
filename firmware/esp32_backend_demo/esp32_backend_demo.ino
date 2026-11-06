@@ -56,7 +56,9 @@ char DEVICE_ID[24] = "XZL-000000";              // 运行时生成，全文件�
  * 注意：HMAC 防「凭空伪造」与「重放」，但明文 MQTT 可被嗅探，
  *      要防嗅探篡改必须换 TLS(8883) 或私有 Broker —— 见安全说明。 */
 const char* CMD_SECRET_DEFAULT = "";
+const char* DEV_SECRET_DEFAULT = "";   // 上行签名密钥编译期默认值（留空=烧录后串口注入）
 char cmdSecret[65] = "";
+char devSecret[65] = "";   // 上行数据签名密钥（public broker 上伪造上报会被后台丢弃）
 long long lastCmdTs = 0;                        // 防重放：记录已接受的最大时间戳
 const long long CMD_TS_TOLERANCE = 300;         // 允许 5 分钟时钟偏差
 
@@ -104,7 +106,7 @@ unsigned long devmodeUntil = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long bootTs = 0;
 bool poweredOff = false; // 软件关机（保留 MQTT 监听，可远程开机）
-String fwVersion = "1.2.0";
+String fwVersion = "1.2.1";
 
 /* 时间基准：C3 无 RTC 备份，断电归零。
  * 联网时用 SNTP 校时并记录锚点；离线期间用 millis 差推算；
@@ -521,6 +523,14 @@ void handleDbg(const String& line) {
     StaticJsonDocument<200> d;
     d["dbg"] = "secret"; d["ok"] = true; d["enabled"] = strlen(cmdSecret) > 0;
     char b[220]; serializeJson(d, b); Serial.println(b);
+  } else if (cmd == "devsecret") {
+    /* DBG:devsecret <key> —— 设置上行数据签名密钥（空参数=关闭，仅调试用）
+     * 配好后后台需设置同值环境变量 DEV_SECRET 才能校验；否则后台按未签名处理 */
+    arg.toCharArray(devSecret, sizeof(devSecret));
+    prefs.putString("dev_secret", String(devSecret));
+    StaticJsonDocument<220> d;
+    d["dbg"] = "devsecret"; d["ok"] = true; d["enabled"] = strlen(devSecret) > 0;
+    char b[240]; serializeJson(d, b); Serial.println(b);
   } else if (cmd == "reset") {
     StaticJsonDocument<160> d; d["dbg"] = "reset"; d["ok"] = true; d["action"] = "restart";
     char b[200]; serializeJson(d, b); Serial.println(b);
@@ -631,6 +641,19 @@ bool verifyCmdSig(JsonObject doc, const char* cmd, String& why) {
   if (!constantTimeEq(expect, String(sig))) { why = "签名不匹配"; return false; }
   lastCmdTs = ts;
   return true;
+}
+
+/* 上行报文签名：把「谁、什么时候、发的是哪类报文」签进去。
+ * 公共 broker 任何人都能往同名主题写消息，但拿不到密钥就签不出这条 sig，
+ * 后台据此丢弃伪造上报 —— 传输层不可信也不影响数据真实性。 */
+void signReport(JsonDocument& doc, const char* kind) {
+  if (strlen(devSecret) == 0) return;   // 未配置：兼容模式，后台按「未签名」记录
+  unsigned long ts = (unsigned long)(doc["ts"] | 0.0);
+  String data = String(DEVICE_ID) + "|" + String(ts) + "|" + String(kind);
+  String sig;
+  if (hmacHex(devSecret, data, sig)) {
+    doc["sig"] = sig;
+  }
 }
 
 /* 指令执行回执：让后台知道「发下去的指令到底执行了没有」 */
@@ -913,6 +936,7 @@ void publishStatus() {
   doc["wifi_ssid"] = prefs.getString("wifi_ssid", "");
   doc["workflow_version"] = prefs.getString("wf_version", "");
   doc["volume"] = prefs.getInt("volume", 80);
+  signReport(doc, "status");
   char buf[1900];
   serializeJson(doc, buf);
   mqtt.publish(topic("status").c_str(), buf);
@@ -938,21 +962,23 @@ void publishDiag() {
   items.add(serialized("{\"name\":\"led\",\"status\":\"ok\",\"code\":null,\"value\":\"红→绿→蓝→灭\"}"));
   Serial.println("[TEST] 喇叭自检：播放测试嘟嘟声 1kHz×3（MAX98357A I2S 输出，请留意声音）");
   items.add(serialized("{\"name\":\"speaker\",\"status\":\"ok\",\"code\":null,\"value\":\"嘟嘟声 1kHz×3\"}"));
-  char buf[1300];
+  signReport(doc, "diag");
+  char buf[1400];
   serializeJson(doc, buf);
   mqtt.publish(topic("diag").c_str(), buf);
 }
 
 /* 安全事件即时上报 */
 void publishEvent(const char* type, const char* level, const char* text) {
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<384> doc;
   doc["id"] = DEVICE_ID;
   doc["ts"] = nowEpoch();
   doc["tsConf"] = timeReady ? "synced" : "unset";
   doc["type"] = type;
   doc["level"] = level;
   doc["text"] = text;
-  char buf[260];
+  signReport(doc, "event");
+  char buf[400];
   serializeJson(doc, buf);
   mqtt.publish(topic("event").c_str(), buf);
   localEvent(type, level, text); // 同步进入有线调试事件缓冲
@@ -1043,7 +1069,7 @@ bool otaFromUrl(const char* url, const char* expectSha) {
 
 /* 场景快照上报：检测到可疑场景时上传传感器快照，由后台 AI/规则引擎判断 */
 void publishSnap() {
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<640> doc;
   doc["id"] = DEVICE_ID;
   doc["ts"] = nowEpoch();
   doc["tsConf"] = timeReady ? "synced" : "unset";
@@ -1053,7 +1079,8 @@ void publishSnap() {
   doc["personPresent"] = false;
   doc["cooking"] = false;
   doc["sinceCookStartSec"] = 0;
-  char buf[520];
+  signReport(doc, "snap");
+  char buf[640];
   serializeJson(doc, buf);
   mqtt.publish(topic("snap").c_str(), buf);
   Serial.println("[SNAP] 场景快照已上传（等待后台场景判定）");
@@ -1237,6 +1264,16 @@ void setup() {
     Serial.println("[SEC] 未配置指令签名密钥：下行指令不做验签（仅调试可用，上线前必须配置）");
   } else {
     Serial.println("[SEC] 指令签名已启用，未签名/重放指令将被拒绝");
+  }
+
+  /* 3b. 上行数据签名密钥：NVS 优先 */
+  String dsk = prefs.getString("dev_secret", "");
+  if (dsk.length() == 0) dsk = String(DEV_SECRET_DEFAULT);
+  dsk.toCharArray(devSecret, sizeof(devSecret));
+  if (strlen(devSecret) == 0) {
+    Serial.println("[SEC] 未配置上行数据签名：上报不带签名（后台兼容模式接受，建议烧录后配置）");
+  } else {
+    Serial.println("[SEC] 上行数据签名已启用，伪造上报会被后台丢弃");
   }
 
   /* 4. 看门狗先开：让任何后续死循环都能自恢复 */

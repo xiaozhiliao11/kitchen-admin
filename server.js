@@ -37,7 +37,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 // 前端烧录依赖：esptool-js 浏览器库（WebSerial 真烧录）+ 固件库静态目录
 app.use('/vendor/esptool-js', express.static(path.join(__dirname, 'node_modules', 'esptool-js')));
-app.use('/firmware-store', express.static(config.firmwareDir));
+// 不再匿名暴露固件目录：固件只能通过 /api/firmwares/:id/download 取（该接口会校验登录或签名链接）
 
 /* ---------------- 账号登录体系（管理员 + 团队子账号） ---------------- */
 // 会话签名密钥：优先环境变量；否则首启生成随机密钥并落盘（data/session-secret），
@@ -149,7 +149,44 @@ function loginFail(account) {
 // 鉴权中间件：豁免 健康检查 / 登录 / OTA 固件下载（设备 HTTP 下载不带令牌）
 // 注意：挂在 '/api' 上时 req.path 是去前缀后的路径（'/health'），必须用 originalUrl 判断
 // 后台版本号：与电脑端 / 安卓端保持同一版本，改版时同步递增
-const APP_VERSION = '1.0.1';
+const APP_VERSION = '1.0.2';
+
+// 上行数据签名密钥：与固件 dev_secret 同值。未设置时进入兼容模式（只记录不拦截），
+// 设置 DEV_SECRET_STRICT=1 后才强制丢弃未签名/签名错误的上报。
+const DEV_SECRET = process.env.DEV_SECRET || '';
+const DEV_SECRET_STRICT = process.env.DEV_SECRET_STRICT === '1';
+const lastReportTs = new Map();   // device|kind -> 最近一次已接受的时间戳（防重放）
+
+function verifyDeviceSig(device, kind, msg) {
+  if (!DEV_SECRET) return { ok: true, relaxed: true };
+  const sig = msg && msg.sig;
+  const ts = Number(msg && msg.ts);
+  if (!sig || !Number.isFinite(ts) || ts <= 0) {
+    return { ok: false, why: '上报未带签名', strict: DEV_SECRET_STRICT };
+  }
+  const data = device + '|' + String(ts) + '|' + kind;
+  const expect = crypto.createHmac('sha256', DEV_SECRET).update(data).digest('hex');
+  // 恒定时间比较：长度不等直接判失败，长度相等用 timingSafeEqual，避免逐字节提前返回泄露时序
+  const a = Buffer.from(String(sig), 'utf8'), b = Buffer.from(expect, 'utf8');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return { ok: false, why: '上报签名不匹配', strict: DEV_SECRET_STRICT };
+  }
+  const key = device + '|' + kind;
+  const last = lastReportTs.get(key) || 0;
+  if (ts < last) return { ok: false, why: '上报时间戳回退（疑似重放）', strict: DEV_SECRET_STRICT };
+  lastReportTs.set(key, ts);
+  if (lastReportTs.size > 5000) lastReportTs.clear();
+  return { ok: true };
+}
+
+/** 统一入口：验签不通过时按严格模式决定丢弃还是放行（兼容未升级固件） */
+function guardReport(device, kind, msg) {
+  const v = verifyDeviceSig(device, kind, msg);
+  if (v.ok) return true;
+  console.warn(`[SEC] ${device} ${kind} 上报被标记：${v.why}`);
+  store.addEvent({ device, type: 'security', level: 'warn', text: `上报校验失败：${v.why}`, ts: Date.now() });
+  return !DEV_SECRET_STRICT;   // 兼容模式：记录但放行；严格模式：丢弃
+}
 
 const AUTH_EXEMPT = new Set(['/api/health', '/api/auth/login']);
 app.use('/api', (req, res, next) => {
@@ -370,6 +407,7 @@ function handleStatus(device, msg) {
   if (msg.id != null && String(msg.id) !== device) return warnBadStatus(device, '冒名心跳（载荷 id 与主题不符）', msg);
   const recognizable = msg.state != null || msg.battery != null || msg.fw != null || msg.sensors != null;
   if (!recognizable) return warnBadStatus(device, '无法识别的状态载荷', msg);
+  if (!guardReport(device, 'status', msg)) return;   // 上行验签：伪造的「设备在线」进不来
 
   // 入站载荷先净化再用（id 校验与可识别性判断在净化前完成，不受影响）
   msg = deepSanitize(msg) || {};
@@ -419,6 +457,7 @@ function handleStatus(device, msg) {
 }
 
 function handleEvent(device, msg) {
+  if (!guardReport(device, 'event', msg)) return;
   // 事件时间一律以服务端时间为准：真机固件上报的 ts 是运行毫秒数（millis），不是 Unix 时间戳，
   // 直接采用会导致事件时间错乱（显示 1970 年、排序异常）。
   const now = Date.now();
@@ -429,6 +468,7 @@ function handleEvent(device, msg) {
 }
 
 function handleDiag(device, msg) {
+  if (!guardReport(device, 'diag', msg)) return;
   const analysis = analyzeDiag(msg.items || []);
   // 可选 AI 增强（使用后台「AI 与工作流」页可编辑的 settings.ai；失败不影响主流程）
   const aiCfg = settings.ai;
@@ -566,6 +606,7 @@ async function callSceneAI(device, sensors, ctx) {
 
 /* 主机场景快照 → 判断 → 回发 dev/{id}/ai */
 function handleSnap(device, msg) {
+  if (!guardReport(device, 'snap', msg)) return;
   const sensors = msg.sensors || {};
   const ctx = {
     personPresent: !!((sensors.radar && sensors.radar.presence) || msg.personPresent),
