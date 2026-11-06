@@ -1133,9 +1133,10 @@ void publishDiag() {
     addItem("sht", "err", "T1", "I2C 0x44 无应答");
   }
 
-  // 4 声敏
+  // 4 声敏：ESP32-C3 只有 GPIO0~GPIO4(ADC1) 与 GPIO5(ADC2) 具备 ADC，
+  // GPIO20 上 analogRead 恒返回 0 —— 直接报「故障」会变成永久假告警，所以判为 skip 并说明原因
   if (sen.mic <= 0) {
-    addItem("mic", "warn", "M1", "读数为 0（环境安静或接线/电位器异常）");
+    addItem("mic", "skip", "M1", "当前接在 GPIO20（该脚无 ADC，读数恒 0）：需改用数字输出 DO 接普通 GPIO，或改板到 ADC 脚");
   } else {
     snprintf(vbuf, sizeof(vbuf), "峰值 %d", sen.mic);
     addItem("mic", "ok", NULL, vbuf);
@@ -1246,8 +1247,9 @@ bool otaFromUrl(const char* url, const char* expectSha) {
     SHA256_UPDATE(&ctx, buf, (unsigned)n);
     if (Update.write(buf, (size_t)n) != (size_t)n) { ok = false; break; }
     remain -= n;
-    if (++chunk % 32 == 0) {
-      esp_task_wdt_reset();                        // 每 32KB 喂狗（不能用 remain%32768，非整数倍时永不命中）
+    // 弱网（<1KB/s）下 32KB 才喂一次狗会超时重启，因此改成「每 8 块(8KB) 或每 3 秒」先到先喂
+    if (chunk % 8 == 0 || millis() - lastKeepalive >= 3000UL) {
+      esp_task_wdt_reset();
       mqtt.loop();                                 // 下载期间保持 MQTT 链路（否则 broker 保活超时会断开）
     }
     if (millis() - lastKeepalive >= 10000UL) {     // 每 10 秒一条轻量心跳，后台不会误判离线
